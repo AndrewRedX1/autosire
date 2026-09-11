@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AutoSire | Gestión SUNAT</title>
+  <link rel="icon" href="logo.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <section class="login-screen" id="loginScreen">
+    <div class="login-card">
+      <img src="logo.png" alt="AutoSire" style="width: 56px; height: 56px; object-fit: contain; margin-bottom: 16px; border-radius: 12px; box-shadow: 0 4px 14px rgba(0,0,0,0.08);">
+      <p class="eyebrow">AUTOSIRE</p>
+      <h1>Bienvenido</h1>
+      <p class="login-copy">Ingresa con el usuario asociado a tu licencia.</p>
+      <form id="loginForm" class="login-form">
+        <div class="form-group">
+          <label for="loginUsername">Usuario</label>
+          <input type="text" id="loginUsername" autocomplete="username" autofocus>
+        </div>
+        <div class="form-group">
+          <label for="loginPassword">Contraseña</label>
+          <input type="password" id="loginPassword" autocomplete="current-password">
+        </div>
+        <details class="login-license-options">
+          <summary>Usar clave de licencia o cambiar servidor</summary>
+          <div class="form-group">
+            <label for="loginKey">Clave de licencia</label>
+            <input type="text" id="loginKey" placeholder="AUTOSIRE-XXXX-XXXX">
+          </div>
+          <div class="form-group">
+            <label for="loginServer">Servidor AutoSire</label>
+            <input type="text" id="loginServer" value="http://localhost:8090" required>
+          </div>
+        </details>
+        <label class="checkbox-container login-remember">
+          <input type="checkbox" id="loginRemember" checked>
+          <span class="checkmark"></span>
+          Recordar este usuario y mantener la sesión
+        </label>
+        <button type="submit" class="btn btn-primary login-button" id="btnLogin">
+          <span>Ingresar a AutoSire</span>
+          <span class="spinner" id="loginSpinner" style="display:none;"></span>
+        </button>
+        <p class="login-error" id="loginError"></p>
+      </form>
+      <div class="machine-id-box login-machine">
+        <span>Equipo</span>
+        <code id="displayMachineId">Verificando…</code>
+      </div>
+    </div>
+  </section>
+
+  <div class="app-container" id="appShell" style="display:none;">
+    <button type="button" class="sidebar-toggle" id="sidebarToggle" aria-label="Abrir menú" aria-expanded="false">☰</button>
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <img src="logo.png" alt="AutoSire" style="width: 34px; height: 34px; object-fit: contain; border-radius: 8px;">
+        <div><strong>AutoSire</strong><small>Gestión SUNAT</small></div>
+      </div>
+      <nav class="sidebar-nav" aria-label="Navegación principal">
+        <a class="sidebar-link active" href="#empresasSection" data-section="empresasSection"><span>01</span> Empresas</a>
+        <a class="sidebar-link" href="#sireSection" data-section="sireSection"><span>02</span> Propuesta SIRE</a>
+        <a class="sidebar-link" href="#proposalDownloads" data-section="proposalDownloads"><span>03</span> Descargas</a>
+        <a class="sidebar-link" href="#progressSection" data-section="progressSection"><span>04</span> Resultados</a>
+      </nav>
+      <div class="sidebar-foot">Cliente local seguro</div>
+    </aside>
+    <div class="app-main">
+    <!-- Encabezado -->
+    <header class="header">
+      <div class="header-brand">
+        <div class="brand-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+        </div>
+        <div>
+          <h1>AutoSire</h1>
+          <p class="subtitle">Propuestas SIRE y comprobantes electrónicos SUNAT</p>
+        </div>
+      </div>
+      
+      <div class="header-status-group">
+        <div class="license-status-card" id="licenseStatusCard">
+          <div class="status-indicator">
+            <span class="status-dot" id="licenseDot"></span>
+            <span id="licenseLabel">Licencia: Verificando...</span>
+          </div>
+          <div class="status-details">
+            <span id="licenseDetailsText"></span>
+            <button type="button" class="btn-link" id="btnManageLicense">Activar / Cambiar</button>
+          </div>
+        </div>
+
+        <div class="auth-status-card" id="authStatusCard">
+          <div class="status-indicator">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusLabel">SUNAT: Desconectado</span>
+          </div>
+          <div class="status-details" id="statusDetails">Configure sus credenciales SOL</div>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" id="btnLogout">Salir</button>
+      </div>
+    </header>
+
+    <!-- Panel Grid Principal -->
+    <main class="dashboard-grid">
+      <!-- Columna Izquierda: Credenciales y Excel -->
+      <section class="card credentials-card" id="empresasSection">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="step-badge">1</span>
+            <h2>Empresas SUNAT</h2>
+          </div>
+          <span class="tag-direct">Cifrado local</span>
+        </div>
+
+        <div class="company-selector">
+          <div class="form-group company-select-field">
+            <label for="companySelect">Empresa guardada</label>
+            <select id="companySelect">
+              <option value="">Aún no hay empresas</option>
+            </select>
+          </div>
+          <button type="button" class="btn btn-primary" id="btnSelectCompany">Conectar con SUNAT</button>
+          <button type="button" class="btn btn-secondary" id="btnDeleteCompany">Eliminar</button>
+        </div>
+
+        <div class="section-divider"><span>Agregar empresa</span></div>
+        <form id="authForm" class="form-grid">
+          <div class="form-group col-6">
+            <label for="ruc">RUC Empresa</label>
+            <input type="text" id="ruc" maxlength="11" placeholder="Ej: 20522128717" required autocomplete="off">
+          </div>
+          <div class="form-group col-6">
+            <label for="businessName">Razón social</label>
+            <input type="text" id="businessName" placeholder="Nombre de la empresa" required autocomplete="off">
+          </div>
+          <div class="form-group col-6">
+            <label for="usuarioSol">Usuario SOL</label>
+            <input type="text" id="usuarioSol" placeholder="Ej: MODDATOS" required autocomplete="off">
+          </div>
+          <div class="form-group col-6">
+            <label for="claveSol">Clave SOL</label>
+            <input type="password" id="claveSol" placeholder="••••••••••••" required autocomplete="off">
+          </div>
+          <div class="form-group col-12">
+            <label for="clientId">Client ID (API SUNAT)</label>
+            <input type="text" id="clientId" placeholder="Ej: 5a47a791-103e-4733-bf41-..." required autocomplete="off">
+          </div>
+          <div class="form-group col-12">
+            <label for="clientSecret">Client Secret</label>
+            <input type="password" id="clientSecret" placeholder="••••••••••••••••••••••••" required autocomplete="off">
+          </div>
+
+          <div class="form-actions col-12">
+            <span class="secure-note">Las claves se protegen con Windows y nunca se muestran nuevamente.</span>
+            <button type="submit" class="btn btn-primary" id="btnAuth">
+              <span class="btn-text">Guardar empresa</span>
+              <span class="spinner" id="authSpinner" style="display:none;"></span>
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Columna Derecha: Carga de Excel y Configuración -->
+      <section class="card upload-card" id="comprobantesSection" style="display:none;">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="step-badge">2</span>
+            <h2>Cargar Comprobantes (Excel)</h2>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <a href="/api/excel/template" class="btn btn-outline" style="font-size:0.8rem; padding: 5px 12px; text-decoration:none; display:inline-flex; align-items:center; gap:6px;" download="plantilla_comprobantes.xlsx" title="Descargar plantilla de Excel con formatos admitidos">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              <span>Descargar Plantilla Excel</span>
+            </a>
+            <span class="tag-format">.xlsx / SIRE / CPE / RXH</span>
+          </div>
+        </div>
+
+        <div class="dropzone" id="dropzone">
+          <input type="file" id="fileInput" accept=".xlsx,.xls" style="display: none;">
+          <div class="dropzone-content">
+            <div class="dropzone-icon">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline>
+              </svg>
+            </div>
+            <p class="dropzone-title">Arrastra tu archivo Excel aquí o <button type="button" class="btn-link" id="btnBrowse">explorar</button></p>
+            <p class="dropzone-hint">Compatible con hojas SIRE (RVIE), CPE compras, RXH y listas planas</p>
+          </div>
+        </div>
+
+        <div class="excel-summary" id="excelSummary" style="display:none;">
+          <div class="summary-meta">
+            <div class="meta-item"><strong>Hoja:</strong> <span id="metaSheet">-</span></div>
+            <div class="meta-item"><strong>Periodo:</strong> <span id="metaPeriodo">-</span></div>
+            <div class="meta-item"><strong>Empresa:</strong> <span id="metaEmpresa">-</span></div>
+            <div class="meta-item"><strong>Total Docs:</strong> <span id="metaTotal" class="highlight-num">0</span></div>
+          </div>
+        </div>
+
+        <!-- Opciones de Descarga -->
+        <div class="download-config">
+          <label class="config-title">Descarga masiva por formato</label>
+
+          <div class="concurrency-box">
+            <label for="concurrencyRange">Hilos simultáneos: <strong id="concurrencyVal">6</strong></label>
+            <input type="range" id="concurrencyRange" min="1" max="12" value="6">
+          </div>
+
+          <div class="action-buttons">
+            <button type="button" class="btn btn-format btn-pdf" id="legacyDownloadPdf" disabled><span>PDF</span><small>Descargar todos</small></button>
+            <button type="button" class="btn btn-format btn-xml" id="legacyDownloadXml" disabled><span>XML</span><small>Descargar todos</small></button>
+            <button type="button" class="btn btn-format btn-cdr" id="legacyDownloadCdr" disabled><span>CDR</span><small>Descargar todos</small></button>
+            <button type="button" class="btn btn-danger" id="legacyCancelDownload" style="display: none;">
+              <span>Cancelar</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card sire-proposal-card" id="sireSection">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="step-badge">2A</span>
+            <h2>Visualizar propuesta SUNAT SIRE</h2>
+          </div>
+          <span class="tag-direct">Flujo de tickets SUNAT</span>
+        </div>
+
+        <p class="proposal-description">
+          Genera la propuesta de compras (RCE) o ventas (RVIE) y muestra sus registros en pantalla.
+        </p>
+        <div class="proposal-controls">
+          <div class="form-group">
+            <label for="proposalPeriod">Periodo tributario</label>
+            <input type="month" id="proposalPeriod" required>
+          </div>
+          <div class="form-group">
+            <label for="proposalBook">Registro</label>
+            <select id="proposalBook">
+              <option value="RCE">Compras (RCE)</option>
+              <option value="RVIE">Ventas (RVIE)</option>
+            </select>
+          </div>
+          <label class="checkbox-container proposal-reuse">
+            <input type="checkbox" id="proposalReuse" checked>
+            <span class="checkmark"></span>
+            Reutilizar la última propuesta terminada si SUNAT demora
+          </label>
+          <button type="button" class="btn btn-primary" id="btnDownloadProposal">
+            <span class="btn-text">Generar y visualizar</span>
+            <span class="spinner" id="proposalSpinner" style="display:none;"></span>
+          </button>
+        </div>
+        <div class="proposal-result" id="proposalResult" style="display:none;"></div>
+        <div class="proposal-downloads" id="proposalDownloads" style="display:none;">
+          <div>
+            <strong>Descargar XML de esta propuesta</strong>
+            <small>Cada XML aparecerá en su fila apenas esté disponible.</small>
+          </div>
+          <div class="action-buttons">
+            <button type="button" class="btn btn-format btn-xml" id="btnDownloadXml" disabled><span>XML</span><small>Descargar propuesta</small></button>
+            <button type="button" class="btn btn-format btn-pdf" id="btnDownloadPdf" disabled style="display:none;"><span>PDF</span><small>Descargar propuesta</small></button>
+            <button type="button" class="btn btn-format btn-cdr" id="btnDownloadCdr" disabled style="display:none;"><span>CDR</span><small>Descargar propuesta</small></button>
+            <button type="button" class="btn btn-danger" id="btnCancelDownload" style="display:none;">Cancelar</button>
+          </div>
+        </div>
+        <div class="proposal-preview" id="proposalPreview" style="display:none;">
+          <div class="preview-toolbar">
+            <div><strong id="proposalPreviewTitle">Registros de propuesta</strong><small id="proposalPreviewMeta"></small></div>
+            <a class="btn btn-secondary btn-sm" id="proposalZipLink" href="#">Descargar ZIP original</a>
+          </div>
+          <div class="table-responsive proposal-table-wrap">
+            <table class="data-table"><thead id="proposalPreviewHead"></thead><tbody id="proposalPreviewBody"></tbody></table>
+          </div>
+        </div>
+      </section>
+
+      <section class="card uploaded-records-card" id="uploadedRecordsSection" style="display:none;" hidden>
+        <div class="card-header">
+          <div class="card-title"><span class="step-badge">3</span><h2>Registros cargados</h2></div>
+          <span class="tag-format" id="uploadedRecordsCount">0 registros</span>
+        </div>
+        <p class="proposal-description">Descarga o visualiza PDF, XML y CDR individualmente para cada comprobante.</p>
+        <div class="table-responsive records-table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Comprobante</th><th>RUC</th><th>Fecha</th><th>PDF</th><th>XML</th><th>CDR</th></tr></thead>
+            <tbody id="uploadedRecordsBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <dialog class="file-viewer" id="fileViewer" aria-labelledby="fileViewerTitle">
+      <div class="file-viewer-bar">
+        <strong id="fileViewerTitle">Visor XML</strong>
+        <button type="button" class="viewer-close" id="fileViewerClose" aria-label="Cerrar visor">Cerrar</button>
+      </div>
+      <iframe id="fileViewerFrame" title="Contenido del archivo XML"></iframe>
+    </dialog>
+
+    <!-- Panel de Progreso y Resultados en Tiempo Real -->
+    <section class="card progress-section" id="progressSection" style="display: none;">
+      <div class="card-header">
+        <div class="card-title">
+          <span class="step-badge">3</span>
+          <h2>Estado del Proceso de Descarga</h2>
+        </div>
+        <div class="progress-actions">
+          <button type="button" class="btn btn-secondary btn-sm" id="btnOpenFolder">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            Abrir en Explorador de Windows
+          </button>
+          <button type="button" class="btn btn-primary btn-sm" id="btnDownloadZip">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            Descargar Lote (ZIP)
+          </button>
+        </div>
+      </div>
+
+      <!-- Barra de progreso -->
+      <div class="progress-container">
+        <div class="progress-bar-wrapper">
+          <div class="progress-bar" id="progressBar" style="width: 0%;"></div>
+        </div>
+        <div class="progress-stats">
+          <span id="progressPercent">0%</span>
+          <span id="progressMessage">Preparando cola de descarga...</span>
+        </div>
+      </div>
+
+      <div class="stats-counters">
+        <div class="stat-card">
+          <span class="stat-label">Total Archivos</span>
+          <span class="stat-value" id="statTotal">0</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Procesados</span>
+          <span class="stat-value" id="statProcessed">0</span>
+        </div>
+        <div class="stat-card stat-success">
+          <span class="stat-label">Descargados OK</span>
+          <span class="stat-value" id="statSuccess">0</span>
+        </div>
+        <div class="stat-card stat-error">
+          <span class="stat-label">Fallidos</span>
+          <span class="stat-value" id="statError">0</span>
+        </div>
+        <div class="stat-card stat-speed">
+          <span class="stat-label">Velocidad</span>
+          <span class="stat-value" id="statSpeed">0 <small style="font-size:0.8rem; font-weight:normal;">docs/s</small></span>
+        </div>
+        <div class="stat-card stat-eta">
+          <span class="stat-label">Tiempo Estimado</span>
+          <span class="stat-value" id="statEta">--</span>
+        </div>
+      </div>
+
+      <!-- Pestañas de Vista: Comprobantes vs Terminal Logs -->
+      <div class="tabs-header">
+        <button class="tab-btn active" data-tab="tabResults">Comprobantes (<span id="resultsCount">0</span>)</button>
+        <button class="tab-btn" data-tab="tabLogs">Consola de Eventos</button>
+      </div>
+
+      <div class="tab-content active" id="tabResults">
+        <div class="table-responsive">
+          <table class="data-table" id="resultsTable">
+            <thead>
+              <tr>
+                <th>Descarga</th>
+                <th>Tipo</th>
+                <th>RUC</th>
+                <th>Doc</th>
+                <th>Serie-Número</th>
+                <th>Estado CDR SUNAT</th>
+                <th>Firma Digital</th>
+                <th>Archivo Local</th>
+                <th>Detalle / Error</th>
+              </tr>
+            </thead>
+            <tbody id="resultsTbody">
+              <tr>
+                <td colspan="9" class="text-center text-muted">Aún no se han procesado comprobantes</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="tab-content" id="tabLogs">
+        <div class="terminal-container" id="terminalLogs">
+          <div class="terminal-line text-muted">// Los eventos del servidor aparecerán en tiempo real aquí...</div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <p>AutoSire CPE Híbrido &bull; Cliente Seguro Go &bull; Conexión Central con VPS</p>
+    </footer>
+    </div>
+  </div>
+
+  <script src="app.js?v=5"></script>
+</body>
+</html>

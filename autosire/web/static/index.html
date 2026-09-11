@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AutoSire Cloud | Centro de Control y Licenciamiento</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card: #131b2e;
+      --border: #23314d;
+      --primary: #3b82f6;
+      --success: #10b981;
+      --danger: #ef4444;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 30px 20px; }
+    .container { max-width: 1100px; margin: 0 auto; }
+    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; border-bottom: 1px solid var(--border); padding-bottom: 20px; }
+    .logo-box { display: flex; align-items: center; gap: 12px; }
+    .logo-badge { background: linear-gradient(135deg, #3b82f6, #06b6d4); color: white; padding: 10px 14px; border-radius: 12px; font-weight: 700; font-size: 1.2rem; }
+    h1 { font-size: 1.4rem; font-weight: 700; }
+    .subtitle { color: var(--muted); font-size: 0.85rem; }
+    .btn { background: var(--primary); color: white; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-size: 0.9rem; }
+    .btn:hover { opacity: 0.9; }
+    .btn-sm { padding: 5px 10px; font-size: 0.75rem; border-radius: 6px; }
+    .btn-toggle { background: rgba(255,255,255,0.08); border: 1px solid var(--border); color: var(--text); }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-bottom: 24px; }
+    .table { width: 100%; border-collapse: collapse; text-align: left; }
+    .table th { padding: 12px 14px; font-size: 0.75rem; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--border); }
+    .table td { padding: 14px; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 0.85rem; }
+    .badge { padding: 3px 8px; border-radius: 12px; font-size: 0.72rem; font-weight: 600; }
+    .badge-active { background: rgba(16,185,129,0.2); color: #34d399; }
+    .badge-inactive { background: rgba(239,68,68,0.2); color: #f87171; }
+    .mono { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; }
+    .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); align-items: center; justify-content: center; z-index: 10; }
+    .modal-content { background: var(--card); border: 1px solid var(--border); border-radius: 12px; width: 100%; max-width: 460px; padding: 24px; }
+    .form-group { margin-bottom: 16px; }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 6px; }
+    input, select { width: 100%; background: #0e1424; border: 1px solid var(--border); color: var(--text); padding: 10px 12px; border-radius: 8px; font-size: 0.9rem; outline: none; }
+    .form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo-box">
+        <div class="logo-badge">AS</div>
+        <div>
+          <h1>AutoSire Cloud Server</h1>
+          <p class="subtitle">Panel Central de Control y Emisión de Licencias (.exe)</p>
+        </div>
+      </div>
+      <button class="btn" id="btnNewLicense">+ Emitir Nueva Licencia</button>
+    </div>
+
+    <div class="card">
+      <h2 style="font-size: 1.1rem; margin-bottom: 16px;">Licencias y Clientes Registrados</h2>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Estado</th>
+            <th>Usuario</th>
+            <th>Clave Licencia</th>
+            <th>Plan</th>
+            <th>Vigencia</th>
+            <th>Machine ID (PC)</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="licensesTbody">
+          <tr><td colspan="7" style="text-align: center; color: var(--muted);">Cargando licencias...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Modal Nueva Licencia -->
+  <div class="modal" id="modalLicense">
+    <div class="modal-content">
+      <h3 style="margin-bottom: 16px;">Nueva Licencia de Cliente</h3>
+      <form id="createLicenseForm">
+        <div class="form-group">
+          <label>Usuario (Login)</label>
+          <input type="text" id="newUsername" required placeholder="Ej: estudio_perez">
+        </div>
+        <div class="form-group">
+          <label>Contraseña</label>
+          <input type="password" id="newPassword" required placeholder="••••••••">
+        </div>
+        <div class="form-group">
+          <label>Plan</label>
+          <select id="newPlan">
+            <option value="Plan Básico CPE (1 Año)">Plan Básico CPE (1 Año)</option>
+            <option value="Plan Estudio Contable (Ilimitado)">Plan Estudio Contable (Ilimitado)</option>
+            <option value="Plan Mensual">Plan Mensual (30 Días)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Duración (Días)</label>
+          <input type="number" id="newDays" value="365" required>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-toggle" id="btnCancelModal">Cancelar</button>
+          <button type="submit" class="btn">Crear Licencia</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    async function loadLicenses() {
+      try {
+        const resp = await fetch('/api/v1/admin/licenses');
+        const data = await resp.json();
+        const tbody = document.getElementById('licensesTbody');
+        if (!data || data.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">No hay licencias registradas</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = data.map(l => {
+          const expDate = new Date(l.expires_at).toLocaleDateString();
+          const daysLeft = Math.ceil((new Date(l.expires_at) - new Date()) / (1000 * 60 * 60 * 24));
+          const badgeClass = l.active && daysLeft > 0 ? 'badge-active' : 'badge-inactive';
+          const badgeText = !l.active ? 'SUSPENDIDA' : (daysLeft > 0 ? `${daysLeft} DÍAS` : 'VENCIDA');
+          const machine = l.machine_id ? l.machine_id.substring(0, 16) + '...' : '<span style="color:var(--muted)">Sin vincular</span>';
+
+          return `
+            <tr>
+              <td><span class="badge ${badgeClass}">${badgeText}</span></td>
+              <td><strong>${l.username}</strong></td>
+              <td><span class="mono">${l.key}</span></td>
+              <td>${l.plan}</td>
+              <td>${expDate}</td>
+              <td><span class="mono">${machine}</span></td>
+              <td>
+                <button class="btn btn-sm btn-toggle" onclick="toggleLicense('${l.key}', ${!l.active})">
+                  ${l.active ? 'Suspender' : 'Reactivar'}
+                </button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function toggleLicense(key, active) {
+      if (!confirm(`¿Desea cambiar el estado de la licencia?`)) return;
+      await fetch('/api/v1/admin/licenses/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, active })
+      });
+      loadLicenses();
+    }
+
+    const modal = document.getElementById('modalLicense');
+    document.getElementById('btnNewLicense').onclick = () => modal.style.display = 'flex';
+    document.getElementById('btnCancelModal').onclick = () => modal.style.display = 'none';
+
+    document.getElementById('createLicenseForm').onsubmit = async (e) => {
+      e.preventDefault();
+      const payload = {
+        username: document.getElementById('newUsername').value.trim(),
+        password: document.getElementById('newPassword').value.trim(),
+        plan: document.getElementById('newPlan').value,
+        days: parseInt(document.getElementById('newDays').value, 10) || 365
+      };
+
+      await fetch('/api/v1/admin/licenses/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      modal.style.display = 'none';
+      e.target.reset();
+      loadLicenses();
+    };
+
+    loadLicenses();
+  </script>
+</body>
+</html>

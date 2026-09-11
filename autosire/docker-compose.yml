@@ -1,0 +1,15 @@
+services:
+  autosire:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: autosire-license-server
+    restart: always
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PORT=8090
+      - DATA_DIR=/app/data
+      - SECRET_KEY=AUTOSIRE-SECRET-2026-VPS-KEY

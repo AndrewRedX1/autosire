@@ -1,0 +1,46 @@
+# ==========================================
+# AutoSire - Git Ignore
+# ==========================================
+
+# Ejecutables y binarios compilados
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.resources
+*.accdb
+*.vsto*
+*.cer
+*.pfx
+*.res
+*.bak
+*.manifest
+
+# Descompilación y archivos heredados de C# / VSTO
+decompiled/
+runtimes/
+patch_macro.py
+unins000.*
+check_manifest.py
+AppSireCPE*
+
+# Datos temporales y de ejecución local
+**/downloads/
+**/output/
+**/tmp/
+**/.playwright-cli/
+**/data/*.db
+**/data/*.db-shm
+**/data/*.db-wal
+**/data/licenses.json
+**/license.dat
+**/edge_profile/
+**/app_profile/
+
+# Archivos de sistema y editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
