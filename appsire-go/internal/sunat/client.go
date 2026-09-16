@@ -397,6 +397,9 @@ func IsTransientDownloadError(err error) bool {
 	if err == nil {
 		return false
 	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
@@ -409,9 +412,17 @@ func IsTransientDownloadError(err error) bool {
 
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "timeout") ||
+		strings.Contains(message, "unexpected eof") ||
+		strings.Contains(message, "connection reset") ||
+		strings.Contains(message, "broken pipe") ||
+		strings.Contains(message, "server closed") ||
 		strings.Contains(message, "connection") ||
 		strings.Contains(message, "conex") ||
 		strings.Contains(message, "temporal") ||
+		strings.Contains(message, "unavailable") ||
+		strings.Contains(message, "gateway") ||
+		strings.Contains(message, "no se pudo leer") ||
+		strings.Contains(message, "archivo vac") ||
 		strings.Contains(message, "respuesta vac") ||
 		strings.Contains(message, "base64") ||
 		strings.Contains(message, "zip") ||

@@ -2,8 +2,11 @@ package sunat
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"path/filepath"
 	"strings"
 )
 
@@ -91,6 +94,13 @@ func selectXMLDownloadError(primaryErr, fallbackErr error) error {
 	if primaryErr == nil {
 		return fmt.Errorf("descargando XML desde controlcpe: %w", fallbackErr)
 	}
+	// En el cliente Go consultacpe puede cerrar la respuesta con EOF para un
+	// comprobante inexistente. Si controlcpe sí respondió 301/302, esa respuesta
+	// de negocio es concluyente y evita reintentar el mismo documento durante
+	// varios minutos. Otros 429/5xx/timeouts conservan la prioridad transitoria.
+	if isDefinitiveXMLFallbackAfterEOF(primaryErr, fallbackErr) {
+		return fmt.Errorf("descargando XML desde controlcpe: %w", fallbackErr)
+	}
 	if IsTransientDownloadError(fallbackErr) {
 		return fmt.Errorf("descargando XML desde controlcpe: %w", fallbackErr)
 	}
@@ -104,36 +114,42 @@ func selectXMLDownloadError(primaryErr, fallbackErr error) error {
 	)
 }
 
+func isDefinitiveXMLFallbackAfterEOF(primaryErr, fallbackErr error) bool {
+	if !errors.Is(primaryErr, io.EOF) && !errors.Is(primaryErr, io.ErrUnexpectedEOF) {
+		return false
+	}
+	var statusErr *HTTPStatusError
+	if !errors.As(fallbackErr, &statusErr) {
+		return false
+	}
+	body := strings.ToLower(strings.ReplaceAll(statusErr.Body, " ", ""))
+	return strings.Contains(body, `"coderror":"301"`) ||
+		strings.Contains(body, `"coderror":"302"`)
+}
+
 // processXmlResponseBody procesa la respuesta que puede ser JSON Base64 o binario directo (ZIP/XML)
 func (c *SunatClient) processXmlResponseBody(bodyBytes []byte, comp Comprobante, tipo string) (*DownloadedFile, error) {
 	defaultName := fmt.Sprintf("%s-%s-%s-%s.xml", comp.RUC, tipo, comp.Serie, comp.Numero)
 
 	// Caso A: Si es directamente un archivo ZIP en binario (magic bytes PK)
 	if IsZipContent(bodyBytes) {
-		// Extraer el archivo XML de adentro
 		xmlName, xmlContent, err := ExtractFileFromZip(bodyBytes, ".xml")
-		if err == nil {
-			return &DownloadedFile{
-				FileName:        xmlName,
-				ContentType:     "application/xml",
-				Content:         xmlContent,
-				IsZip:           false,
-				OriginalZip:     bodyBytes,
-				OriginalZipName: strings.TrimSuffix(defaultName, ".xml") + ".zip",
-			}, nil
+		if err != nil {
+			return nil, fmt.Errorf("el ZIP de SUNAT no contiene un XML legible: %w", err)
 		}
-		// Si no se pudo extraer o es un ZIP opaco, devolver el zip
+		if !IsXMLContent(xmlContent) {
+			return nil, fmt.Errorf("el ZIP de SUNAT contiene un archivo que no es XML")
+		}
 		return &DownloadedFile{
-			FileName:    strings.TrimSuffix(defaultName, ".xml") + ".zip",
-			ContentType: "application/zip",
-			Content:     bodyBytes,
-			IsZip:       true,
+			FileName:    xmlFileName(xmlName, defaultName),
+			ContentType: "application/xml",
+			Content:     xmlContent,
+			IsZip:       false,
 		}, nil
 	}
 
-	// Caso B: Si es texto XML directo (comienza con <?xml o <)
-	trimmed := strings.TrimSpace(string(bodyBytes))
-	if strings.HasPrefix(trimmed, "<?xml") || strings.HasPrefix(trimmed, "<") {
+	// Caso B: XML directo, incluido UTF-8/UTF-16 con BOM.
+	if IsXMLContent(bodyBytes) {
 		return &DownloadedFile{
 			FileName:    defaultName,
 			ContentType: "application/xml",
@@ -150,26 +166,30 @@ func (c *SunatClient) processXmlResponseBody(bodyBytes []byte, comp Comprobante,
 
 	// Si dentro del Base64 vino un ZIP, extraer el XML
 	if parsed.IsZip {
-		originalZip := parsed.Content
-		originalName := parsed.FileName
 		xmlName, xmlContent, err := ExtractFileFromZip(parsed.Content, ".xml")
-		if err == nil {
-			parsed.FileName = xmlName
-			parsed.Content = xmlContent
-			parsed.IsZip = false
-			parsed.OriginalZip = originalZip
-			if strings.HasSuffix(strings.ToLower(originalName), ".zip") {
-				parsed.OriginalZipName = originalName
-			} else {
-				parsed.OriginalZipName = strings.TrimSuffix(defaultName, ".xml") + ".zip"
-			}
+		if err != nil {
+			return nil, fmt.Errorf("el ZIP Base64 de SUNAT no contiene un XML legible: %w", err)
 		}
+		if !IsXMLContent(xmlContent) {
+			return nil, fmt.Errorf("el ZIP Base64 de SUNAT contiene un archivo que no es XML")
+		}
+		parsed.FileName = xmlFileName(xmlName, defaultName)
+		parsed.Content = xmlContent
+		parsed.IsZip = false
+	} else if !IsXMLContent(parsed.Content) {
+		return nil, fmt.Errorf("SUNAT respondió contenido Base64 que no es XML ni ZIP")
 	}
 
-	if parsed.FileName == "" {
-		parsed.FileName = defaultName
-	}
+	parsed.FileName = xmlFileName(parsed.FileName, defaultName)
 	parsed.ContentType = "application/xml"
 
 	return parsed, nil
+}
+
+func xmlFileName(candidate, fallback string) string {
+	candidate = filepath.Base(strings.TrimSpace(candidate))
+	if candidate == "." || candidate == "" || !strings.EqualFold(filepath.Ext(candidate), ".xml") {
+		return fallback
+	}
+	return candidate
 }

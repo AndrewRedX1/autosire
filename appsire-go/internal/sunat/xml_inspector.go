@@ -2,6 +2,7 @@ package sunat
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/xml"
 	"errors"
 	"strings"
@@ -12,6 +13,42 @@ type CdrInfo struct {
 	ResponseCode string
 	Description  string
 	Estado       string // "ACEPTADO", "RECHAZADO", "OBSERVADO"
+}
+
+// IsXMLContent reconoce XML UTF-8, UTF-8 con BOM y UTF-16 con BOM. SUNAT
+// devuelve las tres variantes según el emisor del comprobante.
+func IsXMLContent(data []byte) bool {
+	trimmed := bytes.TrimSpace(data)
+	trimmed = bytes.TrimPrefix(trimmed, []byte{0xEF, 0xBB, 0xBF})
+	trimmed = bytes.TrimSpace(trimmed)
+	if bytes.HasPrefix(trimmed, []byte("<")) {
+		return true
+	}
+
+	if len(data) < 4 {
+		return false
+	}
+	var order binary.ByteOrder
+	switch {
+	case data[0] == 0xFF && data[1] == 0xFE:
+		order = binary.LittleEndian
+	case data[0] == 0xFE && data[1] == 0xFF:
+		order = binary.BigEndian
+	default:
+		return false
+	}
+	for offset := 2; offset+1 < len(data); offset += 2 {
+		char := order.Uint16(data[offset : offset+2])
+		switch char {
+		case ' ', '\t', '\r', '\n':
+			continue
+		case '<':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // InspectCDR analiza el XML del CDR en memoria y extrae el código y descripción oficial de SUNAT
@@ -109,11 +146,11 @@ func ValidateContentIntegrity(data []byte, expected TipoDescarga) error {
 			return errors.New("el archivo no tiene la cabecera válida de PDF (%PDF)")
 		}
 	case DescargaXML:
-		if !IsZipContent(data) && !strings.HasPrefix(strings.TrimSpace(string(data[:min(len(data), 50)])), "<") {
+		if !IsZipContent(data) && !IsXMLContent(data) {
 			return errors.New("el archivo no contiene estructura válida de XML ni ZIP")
 		}
 	case DescargaCDR:
-		if !IsZipContent(data) && !strings.HasPrefix(strings.TrimSpace(string(data[:min(len(data), 50)])), "<") {
+		if !IsZipContent(data) && !IsXMLContent(data) {
 			return errors.New("el CDR no contiene estructura válida de ZIP o XML")
 		}
 	}

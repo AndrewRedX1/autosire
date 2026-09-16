@@ -698,43 +698,64 @@ func (e *DownloadEngine) processStage(
 	return collected
 }
 
-// retryXMLTransient hace una única pasada de recuperación con menor
-// concurrencia. La espera sucede fuera del pool para que ningún worker quede
-// ocupado durmiendo mientras todavía existen documentos nuevos.
+// retryXMLTransient recupera pendientes en hasta tres barridos con menor
+// concurrencia. Las esperas suceden fuera del pool para no ocupar workers.
 func (e *DownloadEngine) retryXMLTransient(
 	ctx context.Context,
 	job *ActiveBatch,
 	attempts []attemptResult,
 	consultacpeAllowed bool,
 ) []attemptResult {
-	pending := filterAttempts(attempts, func(attempt attemptResult) bool {
-		return attempt.item.Reintentos == 0 && sunat.IsTransientDownloadError(attempt.err)
-	})
-	if len(pending) == 0 || ctx.Err() != nil {
-		return attempts
-	}
+	for sweep := 1; sweep <= maxSweeps; sweep++ {
+		pending := filterAttempts(attempts, func(attempt attemptResult) bool {
+			return sunat.IsTransientDownloadError(attempt.err)
+		})
+		if len(pending) == 0 || ctx.Err() != nil {
+			break
+		}
 
-	e.updateStageMessage(job, fmt.Sprintf("XML: preparando recuperación de %d pendientes", len(pending)))
-	recoveryDelay := xmlRecoveryCooldown
-	for _, attempt := range pending {
-		recoveryDelay = max(recoveryDelay, sunat.RetryAfter(attempt.err))
+		e.updateRecoveryMessage(job, fmt.Sprintf(
+			"XML: recuperación %d/%d de %d pendientes",
+			sweep,
+			maxSweeps,
+			len(pending),
+		))
+		recoveryDelay := xmlRecoveryCooldown * time.Duration(1<<(sweep-1))
+		for _, attempt := range pending {
+			recoveryDelay = max(recoveryDelay, sunat.RetryAfter(attempt.err))
+		}
+		if deadline, ok := ctx.Deadline(); ok && time.Now().Add(recoveryDelay).After(deadline) {
+			e.updateStageMessage(job, "XML: la espera indicada por SUNAT excede el presupuesto del lote")
+			break
+		}
+		if err := waitForStage(ctx, recoveryDelay); err != nil {
+			break
+		}
+		if controller, ok := e.client.(connectionController); ok {
+			controller.ResetTransport()
+		}
+		retried := e.processXMLWaves(
+			ctx,
+			job,
+			attemptComprobantes(pending),
+			retryWorkers,
+			consultacpeAllowed,
+			sweep,
+		)
+		attempts = replaceAttempts(attempts, retried)
 	}
-	if deadline, ok := ctx.Deadline(); ok && time.Now().Add(recoveryDelay).After(deadline) {
-		e.updateStageMessage(job, "XML: la espera indicada por SUNAT excede el presupuesto del lote")
-		return attempts
+	return attempts
+}
+
+func (e *DownloadEngine) updateRecoveryMessage(job *ActiveBatch, message string) {
+	job.Mu.Lock()
+	if job.Status.Porcentaje >= 100 {
+		job.Status.Porcentaje = 99
 	}
-	if err := waitForStage(ctx, recoveryDelay); err != nil {
-		return attempts
-	}
-	retried := e.processXMLWaves(
-		ctx,
-		job,
-		attemptComprobantes(pending),
-		retryWorkers,
-		consultacpeAllowed,
-		1,
-	)
-	return replaceAttempts(attempts, retried)
+	job.Status.Mensaje = message
+	snapshot := cloneBatchStatus(job.Status)
+	job.Mu.Unlock()
+	e.broadcastStatus(snapshot)
 }
 
 func (e *DownloadEngine) retryUnauthorizedCohort(

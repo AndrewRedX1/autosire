@@ -136,7 +136,9 @@ func (m *FileManager) SaveDownloadedFile(comp sunat.Comprobante, file *sunat.Dow
 		return "", fmt.Errorf("error escribiendo archivo en %s: %w", filePath, err)
 	}
 	m.rememberFile(targetDir, fileName, int64(len(file.Content)))
-	if len(file.OriginalZip) > 0 {
+	// Para XML se publica únicamente el comprobante extraído. Conservar además
+	// el ZIP duplicaba espacio y hacía que el índice prefiriera el contenedor.
+	if tipoDescarga != sunat.DescargaXML && len(file.OriginalZip) > 0 {
 		zipName := filepath.Base(file.OriginalZipName)
 		if zipName == "." || zipName == "" {
 			zipName = strings.TrimSuffix(fileName, filepath.Ext(fileName)) + ".zip"
@@ -362,8 +364,8 @@ func addIndexedFile(index map[string]indexedFile, name string, size int64) {
 		tipo = sunat.DescargaPDF
 	case !isCDR && (ext == ".zip" || ext == ".xml"):
 		tipo = sunat.DescargaXML
-		// La macro recibe las extensiones en este orden: .zip, .xml.
-		if ext == ".xml" {
+		// La aplicación publica XML extraído; un ZIP previo queda como respaldo.
+		if ext == ".zip" {
 			priority = 1
 		}
 	default:

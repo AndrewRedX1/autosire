@@ -61,3 +61,21 @@ func TestValidateContentIntegrity(t *testing.T) {
 		t.Errorf("Error inesperado en PDF válido: %v", err)
 	}
 }
+
+func TestIsXMLContentAcceptsBOMEncodings(t *testing.T) {
+	t.Parallel()
+
+	tests := [][]byte{
+		{0xEF, 0xBB, 0xBF, '<', 'I', 'n', 'v', 'o', 'i', 'c', 'e', '/', '>'},
+		{0xFF, 0xFE, '<', 0, 'I', 0, 'n', 0, 'v', 0, 'o', 0, 'i', 0, 'c', 0, 'e', 0, '/', 0, '>', 0},
+		{0xFE, 0xFF, 0, '<', 0, 'I', 0, 'n', 0, 'v', 0, 'o', 0, 'i', 0, 'c', 0, 'e', 0, '/', 0, '>'},
+	}
+	for index, data := range tests {
+		if !IsXMLContent(data) {
+			t.Fatalf("variante XML %d no reconocida", index)
+		}
+		if err := ValidateContentIntegrity(data, DescargaXML); err != nil {
+			t.Fatalf("ValidateContentIntegrity(%d) error = %v", index, err)
+		}
+	}
+}

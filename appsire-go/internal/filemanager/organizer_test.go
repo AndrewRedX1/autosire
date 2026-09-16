@@ -12,7 +12,7 @@ import (
 	"appsire-go/internal/sunat"
 )
 
-func TestSaveDownloadedFilePreservesXMLAndOriginalZIP(t *testing.T) {
+func TestSaveDownloadedFilePublishesOnlyExtractedXML(t *testing.T) {
 	t.Parallel()
 
 	manager := NewFileManager(t.TempDir())
@@ -34,13 +34,13 @@ func TestSaveDownloadedFilePreservesXMLAndOriginalZIP(t *testing.T) {
 		t.Fatalf("XML no guardado: %v", err)
 	}
 	zipPath := filepath.Join(filepath.Dir(xmlPath), file.OriginalZipName)
-	if _, err := os.Stat(zipPath); err != nil {
-		t.Fatalf("ZIP original no conservado: %v", err)
+	if _, err := os.Stat(zipPath); !os.IsNotExist(err) {
+		t.Fatalf("se publicó un ZIP duplicado para XML: %v", err)
 	}
 
 	found, ok := manager.FindExistingFile(comp, sunat.DescargaXML)
-	if !ok || found != zipPath {
-		t.Fatalf("FindExistingFile() = %q, %t, want %q, true", found, ok, zipPath)
+	if !ok || found != xmlPath {
+		t.Fatalf("FindExistingFile() = %q, %t, want %q, true", found, ok, xmlPath)
 	}
 }
 
