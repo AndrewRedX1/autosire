@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -65,7 +66,9 @@ type ticketListResponse struct {
 }
 
 type ProposalClient struct {
+	clientMu      sync.RWMutex
 	httpClient    *http.Client
+	timeout       time.Duration
 	tokenProvider TokenProvider
 	baseURL       string
 }
@@ -79,9 +82,25 @@ func NewProposalClient(tp TokenProvider, timeout time.Duration) *ProposalClient 
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
+		timeout:       timeout,
 		tokenProvider: tp,
 		baseURL:       sireBaseURL,
 	}
+}
+
+// ResetTransport evita compartir conexiones SIRE entre contribuyentes.
+func (c *ProposalClient) ResetTransport() {
+	c.clientMu.Lock()
+	previous := c.httpClient
+	c.httpClient = &http.Client{Timeout: c.timeout}
+	c.clientMu.Unlock()
+	previous.CloseIdleConnections()
+}
+
+func (c *ProposalClient) currentHTTPClient() *http.Client {
+	c.clientMu.RLock()
+	defer c.clientMu.RUnlock()
+	return c.httpClient
 }
 
 func (c *ProposalClient) Download(
@@ -362,7 +381,7 @@ func (c *ProposalClient) getWithRetries(
 		req.Header.Set("Accept", "*/*")
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := c.httpClient.Do(req)
+		resp, err := c.currentHTTPClient().Do(req)
 		if err == nil {
 			body, readErr := io.ReadAll(resp.Body)
 			resp.Body.Close()

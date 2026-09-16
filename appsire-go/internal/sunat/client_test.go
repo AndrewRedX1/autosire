@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 type staticTokenProvider struct{}
@@ -171,6 +172,31 @@ func TestProbeConsultacpeAcceptsDocumentNotFoundAsAuthorized(t *testing.T) {
 	}
 }
 
+func TestProbeConsultacpeDoesNotRetryTransientResponse(t *testing.T) {
+	t.Parallel()
+
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("temporal"))
+	}))
+	defer server.Close()
+
+	client := NewSunatClient(staticTokenProvider{}, 0)
+	client.baseURL = server.URL + "/v1/contribuyente"
+	client.maxRetries = 5
+	err := client.ProbeConsultacpe(t.Context(), Comprobante{
+		RUC: "20123456789", Tipo: "01", Serie: "F001", Numero: "1", Libro: "2",
+	})
+	if err == nil {
+		t.Fatal("ProbeConsultacpe() error = nil, want HTTP 503")
+	}
+	if requests != 1 {
+		t.Fatalf("peticiones de preflight = %d, want 1", requests)
+	}
+}
+
 func TestDownloadXMLControlsRetriesAtBatchLevel(t *testing.T) {
 	t.Parallel()
 
@@ -200,6 +226,23 @@ func TestDownloadXMLControlsRetriesAtBatchLevel(t *testing.T) {
 	}
 }
 
+func TestCPETransportUsesIsolatedHTTP1ConnectionsAndCanReset(t *testing.T) {
+	t.Parallel()
+
+	client := NewSunatClient(staticTokenProvider{}, time.Second)
+	previous := client.transport
+	if !previous.DisableKeepAlives {
+		t.Fatal("DisableKeepAlives = false, want true")
+	}
+	if previous.ForceAttemptHTTP2 {
+		t.Fatal("ForceAttemptHTTP2 = true, want false")
+	}
+	client.ResetTransport()
+	if client.transport == previous {
+		t.Fatal("ResetTransport conservó el transporte anterior")
+	}
+}
+
 func TestHTTPStatusFindsWrappedStatus(t *testing.T) {
 	t.Parallel()
 
@@ -210,5 +253,30 @@ func TestHTTPStatusFindsWrappedStatus(t *testing.T) {
 	}
 	if !errors.As(err, new(*HTTPStatusError)) {
 		t.Fatal("la cadena de error no conserva HTTPStatusError")
+	}
+}
+
+func TestParseRetryAfterSupportsSecondsAndHTTPDate(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.September, 15, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name  string
+		value string
+		want  time.Duration
+	}{
+		{name: "seconds", value: "7", want: 7 * time.Second},
+		{name: "HTTP date", value: now.Add(9 * time.Second).Format(http.TimeFormat), want: 9 * time.Second},
+		{name: "expired date", value: now.Add(-time.Second).Format(http.TimeFormat), want: 0},
+		{name: "invalid", value: "después", want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := parseRetryAfter(tt.value, now); got != tt.want {
+				t.Fatalf("parseRetryAfter(%q) = %s, want %s", tt.value, got, tt.want)
+			}
+		})
 	}
 }

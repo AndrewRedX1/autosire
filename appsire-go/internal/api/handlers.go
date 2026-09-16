@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"appsire-go/internal/auth"
@@ -34,6 +35,15 @@ type Server struct {
 	proposalClient *sunat.ProposalClient
 	companyStore   *company.Store
 	sessionMgr     *session.Manager
+	identityMu     sync.Mutex
+	proposalMu     sync.RWMutex
+	proposals      map[sunat.ProposalBook]proposalBinding
+}
+
+type proposalBinding struct {
+	RUC    string
+	Period string
+	Ticket string
 }
 
 // NewServer inicializa el servidor con sus dependencias
@@ -56,6 +66,7 @@ func NewServer(
 		proposalClient: pc,
 		companyStore:   cs,
 		sessionMgr:     sm,
+		proposals:      make(map[sunat.ProposalBook]proposalBinding),
 	}
 }
 
@@ -118,6 +129,12 @@ func (s *Server) HandleAuthToken(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusMethodNotAllowed, "Método no permitido")
 		return
 	}
+	s.identityMu.Lock()
+	defer s.identityMu.Unlock()
+	if s.downloadEngine.IsRunning() {
+		respondError(w, http.StatusConflict, "El token del lote está en uso; espere a que termine o cancele la descarga")
+		return
+	}
 
 	var creds sunat.SunatCredentials
 	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
@@ -128,10 +145,17 @@ func (s *Server) HandleAuthToken(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
+	previousRUC := strings.TrimSpace(s.tokenService.GetCredentials().RUC)
 	tokenResp, err := s.tokenService.RequestNewToken(ctx, creds)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if previousRUC != "" && previousRUC != strings.TrimSpace(creds.RUC) {
+		if err := s.resetCompanySession(); err != nil {
+			respondError(w, http.StatusConflict, err.Error())
+			return
+		}
 	}
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
@@ -141,6 +165,17 @@ func (s *Server) HandleAuthToken(w http.ResponseWriter, r *http.Request) {
 		"expires_at": tokenResp.ExpiresAt.Format(time.RFC3339),
 		"ruc":        tokenResp.RUC,
 	})
+}
+
+func (s *Server) resetCompanySession() error {
+	if err := s.downloadEngine.ResetSession(); err != nil {
+		return err
+	}
+	s.proposalMu.Lock()
+	s.proposals = make(map[sunat.ProposalBook]proposalBinding)
+	s.proposalMu.Unlock()
+	s.proposalClient.ResetTransport()
+	return nil
 }
 
 // HandleAuthStatus verifica si existe un token vigente en memoria
@@ -212,6 +247,12 @@ func (s *Server) HandleDownloadSireProposal(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusMethodNotAllowed, "Método no permitido")
 		return
 	}
+	s.identityMu.Lock()
+	defer s.identityMu.Unlock()
+	if s.downloadEngine.IsRunning() {
+		respondError(w, http.StatusConflict, "Espere a que termine o cancele la descarga XML antes de obtener otra propuesta")
+		return
+	}
 
 	licStatus := s.licenseMgr.GetStatus()
 	active, ok := licStatus["active"].(bool)
@@ -261,6 +302,13 @@ func (s *Server) HandleDownloadSireProposal(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusUnprocessableEntity, "La propuesta fue guardada, pero no se pudo visualizar: "+err.Error())
 		return
 	}
+	s.proposalMu.Lock()
+	s.proposals[proposal.Book] = proposalBinding{
+		RUC:    credentials.RUC,
+		Period: proposal.Period,
+		Ticket: proposal.Ticket,
+	}
+	s.proposalMu.Unlock()
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"success":     true,
@@ -361,6 +409,8 @@ func (s *Server) HandleStartDownload(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusMethodNotAllowed, "Método no permitido")
 		return
 	}
+	s.identityMu.Lock()
+	defer s.identityMu.Unlock()
 
 	// Comprobación de licencia activa
 	licStatus := s.licenseMgr.GetStatus()
@@ -377,8 +427,15 @@ func (s *Server) HandleStartDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cachedCreds := s.tokenService.GetCredentials()
+	if err := s.validateProposalBinding(req, cachedCreds.RUC); err != nil {
+		respondError(w, http.StatusConflict, err.Error())
+		return
+	}
 	for i := range req.Comprobantes {
-		if req.Comprobantes[i].RUC == "" && cachedCreds.RUC != "" {
+		// La carpeta pertenece siempre a la empresa activa; el RUC del
+		// comprobante se conserva como emisor para construir la URL SUNAT.
+		req.Comprobantes[i].EmpresaRUC = cachedCreds.RUC
+		if (req.Comprobantes[i].RUC == "" || req.Comprobantes[i].Libro == "1") && cachedCreds.RUC != "" {
 			req.Comprobantes[i].RUC = cachedCreds.RUC
 			req.Comprobantes[i].ID = fmt.Sprintf("%s-%s-%s-%s",
 				req.Comprobantes[i].RUC,
@@ -399,6 +456,22 @@ func (s *Server) HandleStartDownload(w http.ResponseWriter, r *http.Request) {
 		"batch_id": batchID,
 		"message":  "Descarga masiva iniciada con éxito",
 	})
+}
+
+func (s *Server) validateProposalBinding(req engine.DownloadRequest, currentRUC string) error {
+	if strings.TrimSpace(req.ProposalBook) == "" {
+		return nil
+	}
+	book := sunat.ProposalBook(strings.ToUpper(strings.TrimSpace(req.ProposalBook)))
+	s.proposalMu.RLock()
+	binding, found := s.proposals[book]
+	s.proposalMu.RUnlock()
+	if !found || binding.Ticket != strings.TrimSpace(req.ProposalTicket) ||
+		binding.Period != strings.TrimSpace(req.ProposalPeriod) ||
+		binding.RUC != strings.TrimSpace(currentRUC) || binding.RUC != strings.TrimSpace(req.OwnerRUC) {
+		return fmt.Errorf("la propuesta ya no coincide con la empresa o período activos; vuelva a obtenerla antes de descargar XML")
+	}
+	return nil
 }
 
 // HandleDownloadStatus retorna el progreso en tiempo real (modo polling fallback)
@@ -503,18 +576,41 @@ func (s *Server) HandleOpenFolder(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HandleDownloadZip comprime y envía la carpeta de descargas como archivo ZIP al navegador
+// HandleDownloadZip entrega solo los archivos exitosos del lote visible.
 func (s *Server) HandleDownloadZip(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		respondError(w, http.StatusMethodNotAllowed, "Método no permitido")
 		return
 	}
 
-	zipFileName := fmt.Sprintf("CPE_Descargas_%s.zip", time.Now().Format("20060102_150405"))
+	status, _ := s.downloadEngine.GetCurrentStatus()
+	if status.BatchID == "" {
+		respondError(w, http.StatusNotFound, "No existe un lote para descargar")
+		return
+	}
+	if status.Estado == "procesando" {
+		respondError(w, http.StatusConflict, "Espere a que termine o cancele el lote antes de generar el ZIP")
+		return
+	}
+	paths := make([]string, 0, status.Exitosos+1)
+	for _, result := range status.Resultados {
+		if result.Exito && strings.TrimSpace(result.RutaLocal) != "" {
+			paths = append(paths, result.RutaLocal)
+		}
+	}
+	if strings.TrimSpace(status.ManifestPath) != "" {
+		paths = append(paths, status.ManifestPath)
+	}
+	if len(paths) == 0 {
+		respondError(w, http.StatusNotFound, "El lote no contiene archivos para entregar")
+		return
+	}
+
+	zipFileName := fmt.Sprintf("CPE_%s.zip", status.BatchID)
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", zipFileName))
 
-	err := s.fileManager.CreateZipPackage(s.fileManager.BaseDir, w)
+	err := s.fileManager.CreateZipFiles(paths, w)
 	if err != nil {
 		http.Error(w, "Error generando ZIP: "+err.Error(), http.StatusInternalServerError)
 		return

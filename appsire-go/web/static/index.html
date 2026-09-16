@@ -3,423 +3,771 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AutoSire | Gestión SUNAT</title>
+  <title>AutoSire | Suite de Gestión SUNAT</title>
   <link rel="icon" href="logo.png" type="image/png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body>
+
+  <!-- ==========================================
+       1. Pantalla de Acceso (Notion Minimalist)
+       ========================================== -->
   <section class="login-screen" id="loginScreen">
     <div class="login-card">
-      <img src="logo.png" alt="AutoSire" style="width: 56px; height: 56px; object-fit: contain; margin-bottom: 16px; border-radius: 12px; box-shadow: 0 4px 14px rgba(0,0,0,0.08);">
-      <p class="eyebrow">AUTOSIRE</p>
-      <h1>Bienvenido</h1>
-      <p class="login-copy">Ingresa con el usuario asociado a tu licencia.</p>
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+        <img src="logo.png" alt="AutoSire" style="width: 42px; height: 42px; object-fit: contain; border-radius: 6px;">
+        <div>
+          <p class="eyebrow">AutoSire Workspace</p>
+          <h1>Iniciar Sesión</h1>
+        </div>
+      </div>
+      <p class="login-copy">Ingresa con las credenciales de tu licencia para acceder a la suite SUNAT.</p>
+      
       <form id="loginForm" class="login-form">
         <div class="form-group">
           <label for="loginUsername">Usuario</label>
-          <input type="text" id="loginUsername" autocomplete="username" autofocus>
+          <input type="text" id="loginUsername" required placeholder="Tu usuario registrado" autocomplete="username">
         </div>
+
         <div class="form-group">
           <label for="loginPassword">Contraseña</label>
-          <input type="password" id="loginPassword" autocomplete="current-password">
+          <input type="password" id="loginPassword" required placeholder="••••••••••••" autocomplete="current-password">
         </div>
-        <details class="login-license-options">
-          <summary>Usar clave de licencia o cambiar servidor</summary>
-          <div class="form-group">
-            <label for="loginKey">Clave de licencia</label>
-            <input type="text" id="loginKey" placeholder="AUTOSIRE-XXXX-XXXX">
-          </div>
-          <div class="form-group">
-            <label for="loginServer">Servidor AutoSire</label>
-            <input type="text" id="loginServer" value="http://localhost:8090" required>
-          </div>
-        </details>
-        <label class="checkbox-container login-remember">
-          <input type="checkbox" id="loginRemember" checked>
-          <span class="checkmark"></span>
-          Recordar este usuario y mantener la sesión
-        </label>
-        <button type="submit" class="btn btn-primary login-button" id="btnLogin">
-          <span>Ingresar a AutoSire</span>
+
+        <div class="login-options">
+          <label class="login-remember">
+            <input type="checkbox" id="loginRemember" checked>
+            <span>Recordar este equipo</span>
+          </label>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block" id="btnLogin">
+          <span class="btn-text">Acceder al Workspace</span>
           <span class="spinner" id="loginSpinner" style="display:none;"></span>
         </button>
-        <p class="login-error" id="loginError"></p>
+
+        <div class="notion-callout notion-callout-gray" style="margin-top: 16px;">
+          <div class="notion-callout-icon">💡</div>
+          <div class="notion-callout-content">
+            Las licencias son validadas en el servidor central y se vinculan a la firma de tu hardware local.
+          </div>
+        </div>
       </form>
-      <div class="machine-id-box login-machine">
-        <span>Equipo</span>
-        <code id="displayMachineId">Verificando…</code>
-      </div>
     </div>
   </section>
 
+  <!-- ==========================================
+       2. Shell Principal de la Aplicación
+       ========================================== -->
   <div class="app-container" id="appShell" style="display:none;">
-    <button type="button" class="sidebar-toggle" id="sidebarToggle" aria-label="Abrir menú" aria-expanded="false">☰</button>
+    <button type="button" class="sidebar-toggle" id="sidebarToggle" aria-label="Abrir navegación" aria-expanded="false">☰</button>
+
+    <!-- Barra lateral Notion Workspace -->
     <aside class="sidebar" id="sidebar">
-      <div class="sidebar-brand">
-        <img src="logo.png" alt="AutoSire" style="width: 34px; height: 34px; object-fit: contain; border-radius: 8px;">
-        <div><strong>AutoSire</strong><small>Gestión SUNAT</small></div>
-      </div>
-      <nav class="sidebar-nav" aria-label="Navegación principal">
-        <a class="sidebar-link active" href="#empresasSection" data-section="empresasSection"><span>01</span> Empresas</a>
-        <a class="sidebar-link" href="#sireSection" data-section="sireSection"><span>02</span> Propuesta SIRE</a>
-        <a class="sidebar-link" href="#proposalDownloads" data-section="proposalDownloads"><span>03</span> Descargas</a>
-        <a class="sidebar-link" href="#progressSection" data-section="progressSection"><span>04</span> Resultados</a>
-      </nav>
-      <div class="sidebar-foot">Cliente local seguro</div>
-    </aside>
-    <div class="app-main">
-    <!-- Encabezado -->
-    <header class="header">
-      <div class="header-brand">
-        <div class="brand-icon">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-            <polyline points="7 10 12 15 17 10"></polyline>
-            <line x1="12" y1="15" x2="12" y2="3"></line>
-          </svg>
-        </div>
-        <div>
-          <h1>AutoSire</h1>
-          <p class="subtitle">Propuestas SIRE y comprobantes electrónicos SUNAT</p>
-        </div>
-      </div>
-      
-      <div class="header-status-group">
-        <div class="license-status-card" id="licenseStatusCard">
-          <div class="status-indicator">
-            <span class="status-dot" id="licenseDot"></span>
-            <span id="licenseLabel">Licencia: Verificando...</span>
-          </div>
-          <div class="status-details">
-            <span id="licenseDetailsText"></span>
-            <button type="button" class="btn-link" id="btnManageLicense">Activar / Cambiar</button>
-          </div>
-        </div>
-
-        <div class="auth-status-card" id="authStatusCard">
-          <div class="status-indicator">
-            <span class="status-dot" id="statusDot"></span>
-            <span id="statusLabel">SUNAT: Desconectado</span>
-          </div>
-          <div class="status-details" id="statusDetails">Configure sus credenciales SOL</div>
-        </div>
-        <button type="button" class="btn btn-secondary btn-sm" id="btnLogout">Salir</button>
-      </div>
-    </header>
-
-    <!-- Panel Grid Principal -->
-    <main class="dashboard-grid">
-      <!-- Columna Izquierda: Credenciales y Excel -->
-      <section class="card credentials-card" id="empresasSection">
-        <div class="card-header">
-          <div class="card-title">
-            <span class="step-badge">1</span>
-            <h2>Empresas SUNAT</h2>
-          </div>
-          <span class="tag-direct">Cifrado local</span>
-        </div>
-
-        <div class="company-selector">
-          <div class="form-group company-select-field">
-            <label for="companySelect">Empresa guardada</label>
-            <select id="companySelect">
-              <option value="">Aún no hay empresas</option>
-            </select>
-          </div>
-          <button type="button" class="btn btn-primary" id="btnSelectCompany">Conectar con SUNAT</button>
-          <button type="button" class="btn btn-secondary" id="btnDeleteCompany">Eliminar</button>
-        </div>
-
-        <div class="section-divider"><span>Agregar empresa</span></div>
-        <form id="authForm" class="form-grid">
-          <div class="form-group col-6">
-            <label for="ruc">RUC Empresa</label>
-            <input type="text" id="ruc" maxlength="11" placeholder="Ej: 20522128717" required autocomplete="off">
-          </div>
-          <div class="form-group col-6">
-            <label for="businessName">Razón social</label>
-            <input type="text" id="businessName" placeholder="Nombre de la empresa" required autocomplete="off">
-          </div>
-          <div class="form-group col-6">
-            <label for="usuarioSol">Usuario SOL</label>
-            <input type="text" id="usuarioSol" placeholder="Ej: MODDATOS" required autocomplete="off">
-          </div>
-          <div class="form-group col-6">
-            <label for="claveSol">Clave SOL</label>
-            <input type="password" id="claveSol" placeholder="••••••••••••" required autocomplete="off">
-          </div>
-          <div class="form-group col-12">
-            <label for="clientId">Client ID (API SUNAT)</label>
-            <input type="text" id="clientId" placeholder="Ej: 5a47a791-103e-4733-bf41-..." required autocomplete="off">
-          </div>
-          <div class="form-group col-12">
-            <label for="clientSecret">Client Secret</label>
-            <input type="password" id="clientSecret" placeholder="••••••••••••••••••••••••" required autocomplete="off">
-          </div>
-
-          <div class="form-actions col-12">
-            <span class="secure-note">Las claves se protegen con Windows y nunca se muestran nuevamente.</span>
-            <button type="submit" class="btn btn-primary" id="btnAuth">
-              <span class="btn-text">Guardar empresa</span>
-              <span class="spinner" id="authSpinner" style="display:none;"></span>
-            </button>
-          </div>
-        </form>
-      </section>
-
-      <!-- Columna Derecha: Carga de Excel y Configuración -->
-      <section class="card upload-card" id="comprobantesSection" style="display:none;">
-        <div class="card-header">
-          <div class="card-title">
-            <span class="step-badge">2</span>
-            <h2>Cargar Comprobantes (Excel)</h2>
-          </div>
-          <div style="display:flex; align-items:center; gap:8px;">
-            <a href="/api/excel/template" class="btn btn-outline" style="font-size:0.8rem; padding: 5px 12px; text-decoration:none; display:inline-flex; align-items:center; gap:6px;" download="plantilla_comprobantes.xlsx" title="Descargar plantilla de Excel con formatos admitidos">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-              <span>Descargar Plantilla Excel</span>
-            </a>
-            <span class="tag-format">.xlsx / SIRE / CPE / RXH</span>
-          </div>
-        </div>
-
-        <div class="dropzone" id="dropzone">
-          <input type="file" id="fileInput" accept=".xlsx,.xls" style="display: none;">
-          <div class="dropzone-content">
-            <div class="dropzone-icon">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                <polyline points="14 2 14 8 20 8"></polyline>
-                <line x1="16" y1="13" x2="8" y2="13"></line>
-                <line x1="16" y1="17" x2="8" y2="17"></line>
-                <polyline points="10 9 9 9 8 9"></polyline>
-              </svg>
-            </div>
-            <p class="dropzone-title">Arrastra tu archivo Excel aquí o <button type="button" class="btn-link" id="btnBrowse">explorar</button></p>
-            <p class="dropzone-hint">Compatible con hojas SIRE (RVIE), CPE compras, RXH y listas planas</p>
-          </div>
-        </div>
-
-        <div class="excel-summary" id="excelSummary" style="display:none;">
-          <div class="summary-meta">
-            <div class="meta-item"><strong>Hoja:</strong> <span id="metaSheet">-</span></div>
-            <div class="meta-item"><strong>Periodo:</strong> <span id="metaPeriodo">-</span></div>
-            <div class="meta-item"><strong>Empresa:</strong> <span id="metaEmpresa">-</span></div>
-            <div class="meta-item"><strong>Total Docs:</strong> <span id="metaTotal" class="highlight-num">0</span></div>
-          </div>
-        </div>
-
-        <!-- Opciones de Descarga -->
-        <div class="download-config">
-          <label class="config-title">Descarga masiva por formato</label>
-
-          <div class="concurrency-box">
-            <label for="concurrencyRange">Hilos simultáneos: <strong id="concurrencyVal">6</strong></label>
-            <input type="range" id="concurrencyRange" min="1" max="12" value="6">
-          </div>
-
-          <div class="action-buttons">
-            <button type="button" class="btn btn-format btn-pdf" id="legacyDownloadPdf" disabled><span>PDF</span><small>Descargar todos</small></button>
-            <button type="button" class="btn btn-format btn-xml" id="legacyDownloadXml" disabled><span>XML</span><small>Descargar todos</small></button>
-            <button type="button" class="btn btn-format btn-cdr" id="legacyDownloadCdr" disabled><span>CDR</span><small>Descargar todos</small></button>
-            <button type="button" class="btn btn-danger" id="legacyCancelDownload" style="display: none;">
-              <span>Cancelar</span>
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section class="card sire-proposal-card" id="sireSection">
-        <div class="card-header">
-          <div class="card-title">
-            <span class="step-badge">2A</span>
-            <h2>Visualizar propuesta SUNAT SIRE</h2>
-          </div>
-          <span class="tag-direct">Flujo de tickets SUNAT</span>
-        </div>
-
-        <p class="proposal-description">
-          Genera la propuesta de compras (RCE) o ventas (RVIE) y muestra sus registros en pantalla.
-        </p>
-        <div class="proposal-controls">
-          <div class="form-group">
-            <label for="proposalPeriod">Periodo tributario</label>
-            <input type="month" id="proposalPeriod" required>
-          </div>
-          <div class="form-group">
-            <label for="proposalBook">Registro</label>
-            <select id="proposalBook">
-              <option value="RCE">Compras (RCE)</option>
-              <option value="RVIE">Ventas (RVIE)</option>
-            </select>
-          </div>
-          <label class="checkbox-container proposal-reuse">
-            <input type="checkbox" id="proposalReuse" checked>
-            <span class="checkmark"></span>
-            Reutilizar la última propuesta terminada si SUNAT demora
-          </label>
-          <button type="button" class="btn btn-primary" id="btnDownloadProposal">
-            <span class="btn-text">Generar y visualizar</span>
-            <span class="spinner" id="proposalSpinner" style="display:none;"></span>
-          </button>
-        </div>
-        <div class="proposal-result" id="proposalResult" style="display:none;"></div>
-        <div class="proposal-downloads" id="proposalDownloads" style="display:none;">
+      <div class="sidebar-header-row">
+        <div class="sidebar-brand">
+          <img src="logo.png" alt="AutoSire">
           <div>
-            <strong>Descargar XML de esta propuesta</strong>
-            <small>Cada XML aparecerá en su fila apenas esté disponible.</small>
-          </div>
-          <div class="action-buttons">
-            <button type="button" class="btn btn-format btn-xml" id="btnDownloadXml" disabled><span>XML</span><small>Descargar propuesta</small></button>
-            <button type="button" class="btn btn-format btn-pdf" id="btnDownloadPdf" disabled style="display:none;"><span>PDF</span><small>Descargar propuesta</small></button>
-            <button type="button" class="btn btn-format btn-cdr" id="btnDownloadCdr" disabled style="display:none;"><span>CDR</span><small>Descargar propuesta</small></button>
-            <button type="button" class="btn btn-danger" id="btnCancelDownload" style="display:none;">Cancelar</button>
+            <strong>AutoSire Suite</strong>
+            <small>Perú · SUNAT SIRE</small>
           </div>
         </div>
-        <div class="proposal-preview" id="proposalPreview" style="display:none;">
-          <div class="preview-toolbar">
-            <div><strong id="proposalPreviewTitle">Registros de propuesta</strong><small id="proposalPreviewMeta"></small></div>
-            <a class="btn btn-secondary btn-sm" id="proposalZipLink" href="#">Descargar ZIP original</a>
-          </div>
-          <div class="table-responsive proposal-table-wrap">
-            <table class="data-table"><thead id="proposalPreviewHead"></thead><tbody id="proposalPreviewBody"></tbody></table>
-          </div>
-        </div>
-      </section>
-
-      <section class="card uploaded-records-card" id="uploadedRecordsSection" style="display:none;" hidden>
-        <div class="card-header">
-          <div class="card-title"><span class="step-badge">3</span><h2>Registros cargados</h2></div>
-          <span class="tag-format" id="uploadedRecordsCount">0 registros</span>
-        </div>
-        <p class="proposal-description">Descarga o visualiza PDF, XML y CDR individualmente para cada comprobante.</p>
-        <div class="table-responsive records-table-wrap">
-          <table class="data-table">
-            <thead><tr><th>Comprobante</th><th>RUC</th><th>Fecha</th><th>PDF</th><th>XML</th><th>CDR</th></tr></thead>
-            <tbody id="uploadedRecordsBody"></tbody>
-          </table>
-        </div>
-      </section>
-    </main>
-
-    <dialog class="file-viewer" id="fileViewer" aria-labelledby="fileViewerTitle">
-      <div class="file-viewer-bar">
-        <strong id="fileViewerTitle">Visor XML</strong>
-        <button type="button" class="viewer-close" id="fileViewerClose" aria-label="Cerrar visor">Cerrar</button>
+        <button type="button" class="btn-sidebar-collapse" id="btnCollapseSidebar" title="Ocultar barra lateral (Ctrl+\)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="11 17 6 12 11 7"></polyline>
+            <polyline points="18 17 13 12 18 7"></polyline>
+          </svg>
+        </button>
       </div>
-      <iframe id="fileViewerFrame" title="Contenido del archivo XML"></iframe>
-    </dialog>
 
-    <!-- Panel de Progreso y Resultados en Tiempo Real -->
-    <section class="card progress-section" id="progressSection" style="display: none;">
-      <div class="card-header">
-        <div class="card-title">
-          <span class="step-badge">3</span>
-          <h2>Estado del Proceso de Descarga</h2>
-        </div>
-        <div class="progress-actions">
-          <button type="button" class="btn btn-secondary btn-sm" id="btnOpenFolder">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-            </svg>
-            Abrir en Explorador de Windows
+      <nav class="sidebar-nav" aria-label="Navegación del espacio de trabajo">
+        <button type="button" class="sidebar-link active" data-view="viewEmpresas" id="navLinkEmpresas">
+          <span class="nav-icon">🏢</span>
+          <span class="nav-label">Empresas</span>
+        </button>
+
+        <div class="sidebar-group" id="sidebarGroupSire">
+          <button type="button" class="sidebar-link sidebar-group-toggle" id="navGroupSire">
+            <div class="group-left">
+              <span class="nav-icon">📑</span>
+              <span class="nav-label">CPE SIRE</span>
+            </div>
+            <span class="group-chevron">▾</span>
           </button>
-          <button type="button" class="btn btn-primary btn-sm" id="btnDownloadZip">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <div class="sidebar-subnav" id="subnavSire">
+            <button type="button" class="sidebar-sublink" data-view="viewRce" id="navLinkRce">
+              <span class="subnav-icon">🛒</span>
+              <span class="subnav-label">Propuesta RCE</span>
+            </button>
+            <button type="button" class="sidebar-sublink" data-view="viewRvie" id="navLinkRvie">
+              <span class="subnav-icon">📈</span>
+              <span class="subnav-label">Propuesta RVIE</span>
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      <div class="sidebar-foot">
+        <span>v1.0 · Local Seguro</span>
+        <button type="button" id="themeToggleBtn" class="btn-link" style="font-size:0.75rem; text-decoration:none;" title="Cambiar tema">🌓 Tema</button>
+      </div>
+    </aside>
+
+    <!-- Contenido Principal -->
+    <div class="app-main">
+      <!-- Botón flotante para expandir sidebar cuando está colapsado -->
+      <button type="button" class="btn-sidebar-expand" id="btnExpandSidebar" title="Mostrar barra lateral (Ctrl+\)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="13 17 18 12 13 7"></polyline>
+          <polyline points="6 17 11 12 6 7"></polyline>
+        </svg>
+      </button>
+      <!-- Encabezado de Página -->
+      <header class="header">
+        <div class="header-brand">
+          <div class="brand-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
               <polyline points="7 10 12 15 17 10"></polyline>
               <line x1="12" y1="15" x2="12" y2="3"></line>
             </svg>
-            Descargar Lote (ZIP)
-          </button>
+          </div>
+          <div>
+            <h1>AutoSire</h1>
+            <p class="subtitle">Gestión masiva de comprobantes de pago electrónicos y propuestas SIRE</p>
+          </div>
         </div>
+
+        <div class="header-status-group">
+          <!-- Indicador de Empresa Activa -->
+          <div class="active-company-pill" id="activeCompanyPill" style="display:none;">
+            <span class="pill-dot"></span>
+            <span id="activeCompanyName">Empresa: -</span>
+            <button type="button" class="pill-action" id="btnHeaderSwitchCompany" title="Cambiar o administrar empresas">Cambiar</button>
+          </div>
+
+          <!-- Licencia Card -->
+          <div class="license-status-card" id="licenseStatusCard">
+            <div class="status-indicator">
+              <span class="status-dot" id="licenseDot"></span>
+              <span id="licenseLabel">Licencia: Verificando...</span>
+            </div>
+            <div class="status-details">
+              <span id="licenseDetailsText"></span>
+              <button type="button" class="btn-link" id="btnManageLicense" style="margin-left: 6px;">Cambiar</button>
+            </div>
+          </div>
+
+          <!-- SUNAT Status Card -->
+          <div class="auth-status-card" id="authStatusCard">
+            <div class="status-indicator">
+              <span class="status-dot" id="statusDot"></span>
+              <span id="statusLabel">SUNAT: Desconectado</span>
+            </div>
+            <div class="status-details" id="statusDetails">Configura las credenciales SOL</div>
+          </div>
+
+          <button type="button" class="btn btn-secondary btn-sm" id="btnLogout">Salir</button>
+        </div>
+      </header>
+
+      <!-- ======      <!-- =======================================================
+           VISTA 1: MÓDULO DEDICADO DE EMPRESAS (NOTION UI)
+           ======================================================= -->
+      <div id="viewEmpresas" class="app-view active">
+        <section class="notion-workspace-page">
+          <!-- Encabezado de Página Notion -->
+          <div class="notion-page-header">
+            <div class="notion-page-title-row">
+              <span class="notion-page-emoji">🏢</span>
+              <div>
+                <h1 class="notion-page-heading">Empresas</h1>
+                <p class="notion-page-subtext">Directorio de contribuyentes y credenciales SOL protegidas localmente con SQLite cifrado.</p>
+              </div>
+            </div>
+            <div class="notion-page-actions">
+              <button type="button" class="btn btn-primary" id="btnNuevaEmpresa">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                <span>Nueva empresa</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Banner Informativo Notion Callout -->
+          <div class="notion-callout notion-callout-yellow" id="lblVencInfo" style="margin-bottom: 20px;">
+            <div class="notion-callout-icon">ℹ️</div>
+            <div class="notion-callout-content" id="lblVencInfoText">
+              No hay cronograma descargado para este período. Selecciona una empresa para iniciar el trabajo en SIRE.
+            </div>
+          </div>
+
+          <!-- Toolbar de Base de Datos Notion -->
+          <div class="notion-db-card">
+            <div class="notion-db-toolbar">
+              <div class="notion-db-search">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                <input type="text" id="txtBuscarEmpresa" placeholder="Filtrar por RUC o razón social..." autocomplete="off">
+              </div>
+
+              <div class="notion-db-filters">
+                <div class="notion-filter-item">
+                  <label for="cboPeriodoVcto">Período:</label>
+                  <select id="cboPeriodoVcto" class="notion-select-sm">
+                    <!-- Opciones dinámicas -->
+                  </select>
+                </div>
+
+                <div class="notion-filter-item">
+                  <label for="cboOrdenEmpresas">Ordenar:</label>
+                  <select id="cboOrdenEmpresas" class="notion-select-sm">
+                    <option value="Nombre_asc">Nombre (A-Z)</option>
+                    <option value="VenceSire_asc">Vence SIRE: más próximo</option>
+                    <option value="VenceSire_desc">Vence SIRE: más lejano</option>
+                    <option value="VencePdt_asc">Vence PDT: más próximo</option>
+                    <option value="UltDigito_asc">Último dígito RUC</option>
+                    <option value="Ruc_asc">RUC</option>
+                    <option value="Token_desc">Token: primero las que faltan</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Botones de Acción Notion -->
+              <div class="notion-db-actions">
+                <button type="button" class="btn btn-secondary btn-sm" id="btnSelectEmpresa" title="Activar esta empresa y conectar con SUNAT">
+                  <span>⚡ Seleccionar</span>
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnEditarEmpresa" title="Modificar datos">
+                  <span>✏️ Editar</span>
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnGenerarToken" title="Probar y obtener Token SUNAT">
+                  <span>🔑 Generar Token</span>
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm btn-danger-hover" id="btnEliminarEmpresa" title="Eliminar de la base de datos">
+                  <span>🗑️ Eliminar</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Tabla Notion Database -->
+            <div class="table-responsive">
+              <table class="data-table notion-companies-table" id="tblEmpresas">
+                <thead>
+                  <tr>
+                    <th style="width: 38px; text-align: center;"><input type="checkbox" id="chkSelectAllEmpresas" title="Seleccionar todo"></th>
+                    <th style="width: 46px; text-align: center;">N°</th>
+                    <th data-sort="nombre">Empresa</th>
+                    <th style="width: 120px;" data-sort="ruc">RUC</th>
+                    <th style="width: 100px; text-align: center;" data-sort="token">Token</th>
+                    <th style="width: 50px; text-align: center;" data-sort="ult">Últ.</th>
+                    <th style="width: 110px; text-align: center;" data-sort="vencesire">Vence SIRE</th>
+                    <th style="width: 110px; text-align: center;" data-sort="vencepdt">Vence PDT</th>
+                    <th style="width: 130px; text-align: center;" data-sort="estado">Estado</th>
+                  </tr>
+                </thead>
+                <tbody id="tbodyEmpresas">
+                  <tr>
+                    <td colspan="9" style="text-align:center; padding: 32px; color: var(--notion-text-subtle);">
+                      Cargando directorio de empresas...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Resumen al pie estilo Notion -->
+            <div class="notion-db-foot">
+              <span id="lblEmpresasCount">0 empresas registradas en SQLite local</span>
+            </div>
+          </div>
+        </section>
       </div>
 
-      <!-- Barra de progreso -->
-      <div class="progress-container">
-        <div class="progress-bar-wrapper">
-          <div class="progress-bar" id="progressBar" style="width: 0%;"></div>
-        </div>
-        <div class="progress-stats">
-          <span id="progressPercent">0%</span>
-          <span id="progressMessage">Preparando cola de descarga...</span>
-        </div>
+      <!-- =======================================================
+           VISTA 2: PROPUESTA RCE (COMPRAS)
+           ======================================================= -->
+      <div id="viewRce" class="app-view" style="display:none;">
+        <main class="dashboard-grid">
+
+          <!-- SECCIÓN: Propuesta SUNAT SIRE RCE -->
+          <section class="card sire-proposal-card" id="sireSectionRce">
+            <div class="card-header">
+              <div class="card-title">
+                <h2>Propuesta Oficial SUNAT SIRE · RCE (Compras)</h2>
+              </div>
+              <span class="tag-direct">Consulta por Tickets SUNAT</span>
+            </div>
+
+            <div class="proposal-controls">
+              <div class="form-group">
+                <label for="proposalPeriodRce">Periodo Tributario</label>
+                <input type="month" id="proposalPeriodRce" required>
+              </div>
+              <div class="form-group">
+                <label>Libro / Registro</label>
+                <div class="tag-format" style="padding: 9px 12px; font-weight: 600; font-size: 0.88rem; background: var(--notion-bg-subtle); border: 1px solid var(--notion-border-strong); border-radius: 6px;">
+                  🛒 Compras — RCE (Registro de Compras Electrónico)
+                </div>
+              </div>
+              <label class="login-remember" style="padding-bottom: 8px;">
+                <input type="checkbox" id="proposalReuseRce" checked>
+                <span>Reutilizar última propuesta si SUNAT demora</span>
+              </label>
+              <button type="button" class="btn btn-primary" id="btnDownloadProposalRce">
+                <span class="btn-text">Generar y Visualizar RCE</span>
+                <span class="spinner" id="proposalSpinnerRce" style="display:none;"></span>
+              </button>
+            </div>
+
+            <!-- Tabla de Previsualización SIRE RCE -->
+            <div class="sire-preview-wrap" id="proposalPreviewWrapRce" style="display:none;">
+              <div class="sire-preview-toolbar">
+                <div class="sire-toolbar-left">
+                  <div class="table-search-box">
+                    <input type="text" id="txtSearchProposalRce" placeholder="Filtrar por RUC, cliente o comprobante..." class="table-search-input">
+                  </div>
+                </div>
+                <div class="sire-toolbar-actions">
+                  <button type="button" class="btn btn-sm btn-secondary" id="btnDescargaXmlRce" title="Descarga de archivos XML">
+                    <span class="btn-icon">📥</span>
+                    <span>Descarga XML</span>
+                  </button>
+                  <button type="button" class="btn btn-sm btn-secondary" id="btnDescargaPdfRce" title="Descarga de representaciones impresas PDF">
+                    <span class="btn-icon">📄</span>
+                    <span>Descarga PDF</span>
+                  </button>
+                  <button type="button" class="btn btn-sm btn-secondary" id="btnDescargaCdrRce" title="Descarga de Constancias de Recepción CDR">
+                    <span class="btn-icon">📋</span>
+                    <span>Descarga CDR</span>
+                  </button>
+                  <button type="button" class="btn btn-sm btn-secondary" id="btnDescargaDescRce" title="Descarga de Detalle y Descripción">
+                    <span class="btn-icon">📝</span>
+                    <span>Descarga Descripcion</span>
+                  </button>
+                </div>
+              </div>
+              <div class="table-responsive sire-table-scroll">
+                <table class="data-table notion-proposal-table" id="proposalPreviewTableRce">
+                  <thead>
+                    <tr>
+                      <th style="width: 45px; text-align: center;">N°</th>
+                      <th>Comp. Pago</th>
+                      <th style="width: 50px; text-align: center;" class="col-xml">XML</th>
+                      <th>Tipo Doc. Ident.</th>
+                      <th>RUC</th>
+                      <th>Razon Social</th>
+                      <th>Fecha</th>
+                      <th>Tipo Doc. Ref</th>
+                      <th>Serie Doc. Ref.</th>
+                      <th>Nro doc. Ref.</th>
+                      <th>Fecha Ref.</th>
+                      <th class="text-right">B.I. Gravada</th>
+                      <th class="text-right">B.I. Gravada 10%</th>
+                      <th class="text-right">B.I. Grav y no Grav.</th>
+                      <th class="text-right">B.I. No Gravada</th>
+                      <th class="text-right">Adq. No Gravada</th>
+                      <th class="text-right">ICBPER</th>
+                      <th class="text-right">IGV</th>
+                      <th class="text-right">Grav. y no Grav. IGV</th>
+                      <th class="text-right">IGV 10%</th>
+                      <th class="text-right">Importe Total</th>
+                      <th class="text-right">ISC</th>
+                      <th class="text-right">no Grav. IGV</th>
+                      <th class="text-right">Otros Conceptos y Cargos</th>
+                      <th class="text-right">Otros Tributos</th>
+                      <th class="text-right">Valor Adquisiciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="proposalPreviewBodyRce"></tbody>
+                  <tfoot id="proposalPreviewFootRce"></tfoot>
+                </table>
+              </div>
+            </div>
+          </section>
+        </main>
       </div>
 
-      <div class="stats-counters">
-        <div class="stat-card">
-          <span class="stat-label">Total Archivos</span>
-          <span class="stat-value" id="statTotal">0</span>
-        </div>
-        <div class="stat-card">
-          <span class="stat-label">Procesados</span>
-          <span class="stat-value" id="statProcessed">0</span>
-        </div>
-        <div class="stat-card stat-success">
-          <span class="stat-label">Descargados OK</span>
-          <span class="stat-value" id="statSuccess">0</span>
-        </div>
-        <div class="stat-card stat-error">
-          <span class="stat-label">Fallidos</span>
-          <span class="stat-value" id="statError">0</span>
-        </div>
-        <div class="stat-card stat-speed">
-          <span class="stat-label">Velocidad</span>
-          <span class="stat-value" id="statSpeed">0 <small style="font-size:0.8rem; font-weight:normal;">docs/s</small></span>
-        </div>
-        <div class="stat-card stat-eta">
-          <span class="stat-label">Tiempo Estimado</span>
-          <span class="stat-value" id="statEta">--</span>
-        </div>
+      <!-- =======================================================
+           VISTA 3: PROPUESTA RVIE (VENTAS)
+           ======================================================= -->
+      <div id="viewRvie" class="app-view" style="display:none;">
+        <main class="dashboard-grid">
+
+          <!-- SECCIÓN: Propuesta SUNAT SIRE RVIE -->
+          <section class="card sire-proposal-card" id="sireSectionRvie">
+            <div class="card-header">
+              <div class="card-title">
+                <h2>Propuesta Oficial SUNAT SIRE · RVIE (Ventas)</h2>
+              </div>
+              <span class="tag-direct">Consulta por Tickets SUNAT</span>
+            </div>
+
+            <div class="proposal-controls">
+              <div class="form-group">
+                <label for="proposalPeriodRvie">Periodo Tributario</label>
+                <input type="month" id="proposalPeriodRvie" required>
+              </div>
+              <div class="form-group">
+                <label>Libro / Registro</label>
+                <div class="tag-format" style="padding: 9px 12px; font-weight: 600; font-size: 0.88rem; background: var(--notion-bg-subtle); border: 1px solid var(--notion-border-strong); border-radius: 6px;">
+                  📈 Ventas — RVIE (Registro de Ventas e Ingresos)
+                </div>
+              </div>
+              <label class="login-remember" style="padding-bottom: 8px;">
+                <input type="checkbox" id="proposalReuseRvie" checked>
+                <span>Reutilizar última propuesta si SUNAT demora</span>
+              </label>
+              <button type="button" class="btn btn-primary" id="btnDownloadProposalRvie">
+                <span class="btn-text">Generar y Visualizar RVIE</span>
+                <span class="spinner" id="proposalSpinnerRvie" style="display:none;"></span>
+              </button>
+            </div>
+
+            <!-- Tabla de Previsualización SIRE RVIE -->
+            <div class="sire-preview-wrap" id="proposalPreviewWrapRvie" style="display:none;">
+              <div class="sire-preview-toolbar">
+                <div class="sire-toolbar-left">
+                  <div class="table-search-box">
+                    <input type="text" id="txtSearchProposalRvie" placeholder="Filtrar por RUC, cliente o comprobante..." class="table-search-input">
+                  </div>
+                </div>
+                <div class="sire-toolbar-actions">
+                  <button type="button" class="btn btn-sm btn-secondary" id="btnDescargaXmlRvie" title="Descarga de archivos XML">
+                    <span class="btn-icon">📥</span>
+                    <span>Descarga XML</span>
+                  </button>
+                  <button type="button" class="btn btn-sm btn-secondary" id="btnDescargaPdfRvie" title="Descarga de representaciones impresas PDF">
+                    <span class="btn-icon">📄</span>
+                    <span>Descarga PDF</span>
+                  </button>
+                  <button type="button" class="btn btn-sm btn-secondary" id="btnDescargaCdrRvie" title="Descarga de Constancias de Recepción CDR">
+                    <span class="btn-icon">📋</span>
+                    <span>Descarga CDR</span>
+                  </button>
+                  <button type="button" class="btn btn-sm btn-secondary" id="btnDescargaDescRvie" title="Descarga de Detalle y Descripción">
+                    <span class="btn-icon">📝</span>
+                    <span>Descarga Descripcion</span>
+                  </button>
+                </div>
+              </div>
+              <div class="table-responsive sire-table-scroll">
+                <table class="data-table notion-proposal-table" id="proposalPreviewTableRvie">
+                  <thead>
+                    <tr>
+                      <th style="width: 45px; text-align: center;">N°</th>
+                      <th>Comp. Pago</th>
+                      <th style="width: 50px; text-align: center;" class="col-xml">XML</th>
+                      <th>Tipo Doc. Ident.</th>
+                      <th>RUC</th>
+                      <th>Razon Social</th>
+                      <th>Fecha</th>
+                      <th>Tipo Doc. Ref</th>
+                      <th>Serie Doc. Ref.</th>
+                      <th>Nro doc. Ref.</th>
+                      <th>Fecha Ref.</th>
+                      <th class="text-right">B.I. Gravada</th>
+                      <th class="text-right">B.I. Gravada 10%</th>
+                      <th class="text-right">B.I. Grav y no Grav.</th>
+                      <th class="text-right">B.I. No Gravada</th>
+                      <th class="text-right">Adq. No Gravada</th>
+                      <th class="text-right">ICBPER</th>
+                      <th class="text-right">IGV</th>
+                      <th class="text-right">Grav. y no Grav. IGV</th>
+                      <th class="text-right">IGV 10%</th>
+                      <th class="text-right">Importe Total</th>
+                      <th class="text-right">ISC</th>
+                      <th class="text-right">no Grav. IGV</th>
+                      <th class="text-right">Otros Conceptos y Cargos</th>
+                      <th class="text-right">Otros Tributos</th>
+                      <th class="text-right">Valor Adquisiciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="proposalPreviewBodyRvie"></tbody>
+                  <tfoot id="proposalPreviewFootRvie"></tfoot>
+                </table>
+              </div>
+            </div>
+          </section>
+        </main>
       </div>
 
-      <!-- Pestañas de Vista: Comprobantes vs Terminal Logs -->
-      <div class="tabs-header">
-        <button class="tab-btn active" data-tab="tabResults">Comprobantes (<span id="resultsCount">0</span>)</button>
-        <button class="tab-btn" data-tab="tabLogs">Consola de Eventos</button>
+      <!-- =======================================================
+           CONTENEDOR COMPARTIDO DE DESCARGAS MASIVAS & LOGS
+           (Se inserta dinámicamente en el slot de la vista activa)
+           ======================================================= -->
+      <div id="sireSharedDownloads" style="display:none;">
+        <!-- SECCIÓN 3: Descarga Masiva de Comprobantes -->
+        <section class="card download-card" id="proposalDownloads" style="margin-top: 16px;">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="step-badge">2</span>
+              <h2>Descarga Masiva de Comprobantes</h2>
+            </div>
+            <div class="action-buttons">
+              <button type="button" class="btn btn-secondary btn-sm" id="btnDownloadTemplate">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                <span>Plantilla Excel</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="file-upload-zone" id="uploadZone">
+            <input type="file" id="excelFile" accept=".xlsx, .xls" style="display: none;">
+            <div class="dropzone" id="dropzone">
+              <div class="dropzone-icon">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                  <line x1="16" y1="13" x2="8" y2="13"></line>
+                  <line x1="16" y1="17" x2="8" y2="17"></line>
+                </svg>
+              </div>
+              <p class="dropzone-title">Arrastra tu archivo Excel aquí o <button type="button" class="btn-link" id="btnBrowse">explorar</button></p>
+              <p class="dropzone-hint">Compatible con reportes SIRE RVIE/RCE y listas de comprobantes</p>
+            </div>
+          </div>
+
+          <div class="excel-summary" id="excelSummary" style="display:none;">
+            <div class="summary-meta">
+              <div><strong>Hoja:</strong> <span id="metaSheet">-</span></div>
+              <div><strong>Periodo:</strong> <span id="metaPeriodo">-</span></div>
+              <div><strong>Empresa:</strong> <span id="metaEmpresa">-</span></div>
+              <div><strong>Total Comprobantes:</strong> <span id="metaTotal" class="highlight-num">0</span></div>
+            </div>
+          </div>
+
+          <div class="download-config">
+            <div class="concurrency-box">
+              <label for="concurrencyRange">Hilos simultáneos: <strong id="concurrencyVal">6</strong></label>
+              <input type="range" id="concurrencyRange" min="1" max="12" value="6">
+            </div>
+            <div class="action-buttons">
+              <button type="button" class="btn btn-format btn-pdf" id="legacyDownloadPdf" disabled><span>PDF</span><small>Descargar todos</small></button>
+              <button type="button" class="btn btn-format btn-xml" id="legacyDownloadXml" disabled><span>XML</span><small>Descargar todos</small></button>
+              <button type="button" class="btn btn-format btn-cdr" id="legacyDownloadCdr" disabled><span>CDR</span><small>Descargar todos</small></button>
+              <button type="button" class="btn btn-danger" id="legacyCancelDownload" style="display: none;"><span>Cancelar</span></button>
+            </div>
+          </div>
+        </section>
+
+        <!-- SECCIÓN 4: Registros Cargados Individuales -->
+        <section class="card uploaded-records-card" id="uploadedRecordsSection" style="display:none;" hidden>
+          <div class="card-header">
+            <div class="card-title">
+              <span class="step-badge">3</span>
+              <h2>Registros Importados</h2>
+            </div>
+            <span class="tag-format" id="uploadedRecordsCount">0 registros</span>
+          </div>
+          <div class="table-responsive records-table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Comprobante</th><th>RUC</th><th>Fecha</th><th>PDF</th><th>XML</th><th>CDR</th></tr></thead>
+              <tbody id="uploadedRecordsBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- SECCIÓN 5: Estado de Descarga en Vivo & Logs -->
+        <section class="card progress-section" id="progressSection" style="display: none; margin-top: 16px;">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="step-badge">4</span>
+              <h2>Estado de Descarga Masiva</h2>
+            </div>
+            <div class="action-buttons">
+              <button type="button" class="btn btn-secondary btn-sm" id="btnOpenFolder">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                <span>Abrir Carpeta</span>
+              </button>
+              <button type="button" class="btn btn-primary btn-sm" id="btnDownloadZip">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                <span>Descargar Lote (ZIP)</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Barra de Progreso Minimalista -->
+          <div class="progress-container">
+            <div class="progress-bar-wrapper">
+              <div class="progress-bar" id="progressBar" style="width: 0%;"></div>
+            </div>
+            <div class="progress-stats">
+              <span id="progressPercent">0%</span>
+              <span id="progressMessage">Preparando descarga…</span>
+            </div>
+          </div>
+
+          <!-- Métricas en Cards tipo Notion Database -->
+          <div class="stats-counters">
+            <div class="stat-card">
+              <span class="stat-label">Total</span>
+              <span class="stat-value" id="statTotal">0</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Procesados</span>
+              <span class="stat-value" id="statProcessed">0</span>
+            </div>
+            <div class="stat-card stat-success">
+              <span class="stat-label">Exitosos</span>
+              <span class="stat-value" id="statSuccess">0</span>
+            </div>
+            <div class="stat-card stat-error">
+              <span class="stat-label">Errores</span>
+              <span class="stat-value" id="statError">0</span>
+            </div>
+            <div class="stat-card stat-speed">
+              <span class="stat-label">Velocidad</span>
+              <span class="stat-value" id="statSpeed">0 <small style="font-size:0.75rem; font-weight:normal;">docs/s</small></span>
+            </div>
+            <div class="stat-card stat-eta">
+              <span class="stat-label">Tiempo Estimado</span>
+              <span class="stat-value" id="statEta">--</span>
+            </div>
+          </div>
+
+          <!-- Pestañas Notion -->
+          <div class="tabs-header">
+            <button class="tab-btn active" data-tab="tabResults">Comprobantes (<span id="resultsCount">0</span>)</button>
+            <button class="tab-btn" data-tab="tabLogs">Consola de Eventos</button>
+          </div>
+
+          <div class="tab-content active" id="tabResults">
+            <div class="table-responsive">
+              <table class="data-table" id="resultsTable">
+                <thead>
+                  <tr>
+                    <th>Estado</th>
+                    <th>Formato</th>
+                    <th>RUC</th>
+                    <th>Tipo</th>
+                    <th>Serie - Número</th>
+                    <th>Estado CDR</th>
+                    <th>Firma Digital</th>
+                    <th>Visualizar</th>
+                    <th>Detalle</th>
+                  </tr>
+                </thead>
+                <tbody id="resultsTbody">
+                  <tr>
+                    <td colspan="9" style="text-align: center; color: var(--notion-text-subtle); padding: 24px;">
+                      Aún no se han procesado comprobantes en esta sesión.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="tab-content" id="tabLogs">
+            <div class="terminal-container" id="terminalLogs">
+              <div class="terminal-line" style="color: #888;">// Los eventos del motor en Go se mostrarán aquí en tiempo real...</div>
+            </div>
+          </div>
+        </section>
       </div>
 
-      <div class="tab-content active" id="tabResults">
-        <div class="table-responsive">
-          <table class="data-table" id="resultsTable">
-            <thead>
-              <tr>
-                <th>Descarga</th>
-                <th>Tipo</th>
-                <th>RUC</th>
-                <th>Doc</th>
-                <th>Serie-Número</th>
-                <th>Estado CDR SUNAT</th>
-                <th>Firma Digital</th>
-                <th>Archivo Local</th>
-                <th>Detalle / Error</th>
-              </tr>
-            </thead>
-            <tbody id="resultsTbody">
-              <tr>
-                <td colspan="9" class="text-center text-muted">Aún no se han procesado comprobantes</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="tab-content" id="tabLogs">
-        <div class="terminal-container" id="terminalLogs">
-          <div class="terminal-line text-muted">// Los eventos del servidor aparecerán en tiempo real aquí...</div>
-        </div>
-      </div>
-    </section>
-
-    <footer class="footer">
-      <p>AutoSire CPE Híbrido &bull; Cliente Seguro Go &bull; Conexión Central con VPS</p>
-    </footer>
+      <!-- Pie de página Notion -->
+      <footer class="footer">
+        <p>AutoSire v1.0 &bull; Suite Contable SUNAT &bull; Motor Go de Alta Concurrencia</p>
+      </footer>
     </div>
   </div>
 
-  <script src="app.js?v=5"></script>
+  <!-- ==========================================
+       3. Modales y Diálogos
+       ========================================== -->
+
+  <!-- Visor de Archivos (Dialog) -->
+  <dialog class="file-viewer" id="fileViewer" aria-labelledby="fileViewerTitle">
+    <div class="file-viewer-bar">
+      <strong id="fileViewerTitle">Visor de Archivo</strong>
+      <button type="button" class="viewer-close" id="fileViewerClose" aria-label="Cerrar visor">✕ Cerrar</button>
+    </div>
+    <iframe id="fileViewerFrame" title="Contenido del archivo"></iframe>
+  </dialog>
+
+  <!-- Modal Nueva / Editar Empresa (Réplica FrmAgregarEmpresa) -->
+  <dialog class="modal-dialog" id="modalEmpresa" aria-labelledby="modalEmpresaTitle">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modalEmpresaTitle">NUEVA EMPRESA</h3>
+        <button type="button" class="modal-close" id="btnCerrarModalEmpresa" aria-label="Cerrar modal">&times;</button>
+      </div>
+      <form id="formModalEmpresa" class="modal-body">
+        <input type="hidden" id="empresaId" value="0">
+        
+        <div class="form-group">
+          <label for="txtEmpresaRuc">RUC (11 dígitos):</label>
+          <input type="text" id="txtEmpresaRuc" maxlength="11" class="form-control" required placeholder="Ej: 20490304101" autocomplete="off">
+        </div>
+
+        <div class="form-group">
+          <label for="txtEmpresaNombre">Nombre o Razón Social:</label>
+          <input type="text" id="txtEmpresaNombre" class="form-control" required placeholder="Ej: HOTELES CBC S.A.C." autocomplete="off">
+        </div>
+
+        <div class="form-group">
+          <label for="txtEmpresaUsuarioSol">Usuario SOL:</label>
+          <input type="text" id="txtEmpresaUsuarioSol" class="form-control" required placeholder="Ej: ADMIN123" autocomplete="off">
+        </div>
+
+        <div class="form-group">
+          <label for="txtEmpresaClaveSol">Clave SOL:</label>
+          <div class="input-with-toggle">
+            <input type="password" id="txtEmpresaClaveSol" class="form-control" placeholder="••••••••••••" autocomplete="new-password">
+            <label class="toggle-password">
+              <input type="checkbox" id="chkVerClaveSol"> <span>Ver clave</span>
+            </label>
+          </div>
+          <small class="field-hint">En caso de edición, deje en blanco si no desea modificar la clave existente.</small>
+        </div>
+
+        <div class="form-group">
+          <label for="txtEmpresaClientId">Client ID (API SUNAT):</label>
+          <input type="text" id="txtEmpresaClientId" class="form-control" required placeholder="Ej: 50d00e83-2293-46b2-a5a4-..." autocomplete="off">
+        </div>
+
+        <div class="form-group">
+          <label for="txtEmpresaClientSecret">Client Secret (API Clave):</label>
+          <div class="input-with-toggle">
+            <input type="password" id="txtEmpresaClientSecret" class="form-control" placeholder="••••••••••••••••••••" autocomplete="new-password">
+            <label class="toggle-password">
+              <input type="checkbox" id="chkVerClientSecret"> <span>Ver clave</span>
+            </label>
+          </div>
+          <small class="field-hint">En caso de edición, deje en blanco si no desea modificar el secreto existente.</small>
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="cboEmpresaRegimen">Régimen Tributario:</label>
+            <select id="cboEmpresaRegimen" class="form-control">
+              <option value="">(Sin definir)</option>
+              <option value="NRUS">Nuevo RUS</option>
+              <option value="RER">Régimen Especial (RER)</option>
+              <option value="RMT">Régimen MYPE Tributario</option>
+              <option value="RG">Régimen General</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="txtEmpresaWhatsapp">WhatsApp / Contacto:</label>
+            <input type="text" id="txtEmpresaWhatsapp" class="form-control" placeholder="Ej: 987654321" autocomplete="off">
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="btnCancelarModalEmpresa">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="btnGuardarModalEmpresa">
+            <span class="btn-text">Guardar</span>
+            <span class="spinner" id="modalEmpresaSpinner" style="display:none;"></span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <script src="app.js?v=7"></script>
 </body>
 </html>

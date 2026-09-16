@@ -197,6 +197,8 @@ func (r *ExcelReader) extractFromExcel(f *excelize.File, targetSheet string) ([]
 			Libro:        mapping.DefaultLibro,
 			Periodo:      metadata["periodo"],
 			RazonSocial:  razon,
+			EmpresaRUC:   metadata["ruc"],
+			EmpresaRazon: metadata["razon_social"],
 			FechaEmision: fecha,
 			Monto:        monto,
 			RowIndex:     rIdx + 1,

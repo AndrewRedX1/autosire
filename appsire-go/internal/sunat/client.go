@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -40,6 +41,7 @@ type TokenProvider interface {
 type HTTPStatusError struct {
 	StatusCode int
 	Body       string
+	RetryAfter time.Duration
 }
 
 func (e *HTTPStatusError) Error() string {
@@ -59,47 +61,86 @@ type DownloadedFile struct {
 
 // SunatClient cliente especializado para interactuar con la API CPE de SUNAT
 type SunatClient struct {
+	clientMu      sync.RWMutex
 	httpClient    *http.Client
+	transport     *http.Transport
+	timeout       time.Duration
 	tokenProvider TokenProvider
 	maxRetries    int
 	baseURL       string
 	jitterSeq     atomic.Uint64
 }
 
-// NewSunatClient usa HTTP/1.1 y seis conexiones persistentes, igual que el
-// comportamiento efectivo de ServerXMLHTTP en la macro.
+// NewSunatClient mantiene hasta seis solicitudes concurrentes. Los endpoints
+// CPE se usan con conexiones HTTP/1.1 aisladas, igual que ServerXMLHTTP del
+// original, para que una conexión degradada no afecte comprobantes posteriores.
 func NewSunatClient(tp TokenProvider, timeout time.Duration) *SunatClient {
 	if timeout <= 0 {
 		timeout = 35 * time.Second
 	}
 
+	client, transport := newCPEHTTPClient(timeout)
+	return &SunatClient{
+		httpClient:    client,
+		transport:     transport,
+		timeout:       timeout,
+		tokenProvider: tp,
+		maxRetries:    MaxRetriesDefault,
+		baseURL:       SunatCpeBaseURL,
+	}
+}
+
+func newCPEHTTPClient(timeout time.Duration) (*http.Client, *http.Transport) {
+	dialer := &net.Dialer{
+		Timeout:   8 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
 	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   15 * time.Second,
-			KeepAlive: 45 * time.Second,
-		}).DialContext,
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           dialer.DialContext,
 		ForceAttemptHTTP2:     false,
-		MaxIdleConns:          12,
-		MaxIdleConnsPerHost:   6,
+		DisableKeepAlives:     true,
+		MaxIdleConns:          0,
+		MaxIdleConnsPerHost:   0,
 		MaxConnsPerHost:       6,
-		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 		TLSClientConfig: &tls.Config{
 			MinVersion: tls.VersionTLS12,
 		},
-		TLSNextProto: map[string]func(string, *tls.Conn) http.RoundTripper{},
 	}
 
-	return &SunatClient{
-		httpClient: &http.Client{
-			Transport: transport,
-			Timeout:   timeout,
-		},
-		tokenProvider: tp,
-		maxRetries:    MaxRetriesDefault,
-		baseURL:       SunatCpeBaseURL,
+	return &http.Client{Transport: transport, Timeout: timeout}, transport
+}
+
+func (c *SunatClient) currentHTTPClient() *http.Client {
+	c.clientMu.RLock()
+	defer c.clientMu.RUnlock()
+	return c.httpClient
+}
+
+// ResetTransport descarta todo estado de red compartido. Se llama al empezar
+// un lote, al detectar una ola bloqueada y al cambiar de empresa.
+func (c *SunatClient) ResetTransport() {
+	client, transport := newCPEHTTPClient(c.timeout)
+	c.clientMu.Lock()
+	previous := c.transport
+	c.httpClient = client
+	c.transport = transport
+	c.clientMu.Unlock()
+	if previous != nil {
+		previous.CloseIdleConnections()
+	}
+}
+
+// CloseIdleConnections libera cualquier conexión remanente al cerrar el lote.
+func (c *SunatClient) CloseIdleConnections() {
+	c.clientMu.RLock()
+	transport := c.transport
+	c.clientMu.RUnlock()
+	if transport != nil {
+		transport.CloseIdleConnections()
 	}
 }
 
@@ -162,7 +203,7 @@ func (c *SunatClient) doRequestWithRetries(ctx context.Context, method, urlStr s
 		req.Header.Set("Accept", "*/*")
 		req.Header.Set("Cache-Control", "no-cache")
 
-		resp, err := c.httpClient.Do(req)
+		resp, err := c.currentHTTPClient().Do(req)
 		if err != nil {
 			lastErr = err
 			// Error de red/conexión: reintentar
@@ -235,9 +276,8 @@ func (c *SunatClient) doRequestWithRetries(ctx context.Context, method, urlStr s
 	)
 }
 
-// doRequestOnce ejecuta una sola petición. La descarga XML controla sus cinco
-// intentos en el motor de lote, como la macro, evitando multiplicar reintentos
-// internos por los barridos externos.
+// doRequestOnce ejecuta una sola petición. La descarga XML controla su pasada
+// de recuperación en el motor de lote, evitando multiplicar reintentos internos.
 func (c *SunatClient) doRequestOnce(ctx context.Context, method, urlStr string) (*http.Response, []byte, error) {
 	token, err := c.tokenProvider.GetValidToken(ctx)
 	if err != nil {
@@ -251,7 +291,7 @@ func (c *SunatClient) doRequestOnce(ctx context.Context, method, urlStr string) 
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Cache-Control", "no-cache")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.currentHTTPClient().Do(req)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -264,6 +304,7 @@ func (c *SunatClient) doRequestOnce(ctx context.Context, method, urlStr string) 
 		return resp, body, &HTTPStatusError{
 			StatusCode: resp.StatusCode,
 			Body:       strings.TrimSpace(string(body)),
+			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
 		}
 	}
 	sample := strings.ToLower(string(body[:min(len(body), 512)]))
@@ -301,7 +342,9 @@ func (c *SunatClient) ProbeConsultacpe(ctx context.Context, comp Comprobante) er
 		libro,
 	)
 
-	_, _, err := c.doRequestWithRetries(ctx, http.MethodGet, urlStr)
+	// El preflight solo clasifica el acceso. Sus reintentos pertenecen al lote y
+	// no deben retener un worker ni consumir todo el presupuesto del documento.
+	_, _, err := c.doRequestOnce(ctx, http.MethodGet, urlStr)
 	if err == nil {
 		return nil
 	}
@@ -322,9 +365,42 @@ func HTTPStatus(err error) (int, bool) {
 	return statusErr.StatusCode, true
 }
 
+// RetryAfter extrae la espera solicitada por SUNAT de un error HTTP.
+func RetryAfter(err error) time.Duration {
+	var statusErr *HTTPStatusError
+	if !errors.As(err, &statusErr) || statusErr.RetryAfter < 0 {
+		return 0
+	}
+	return statusErr.RetryAfter
+}
+
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	date, err := http.ParseTime(value)
+	if err != nil || !date.After(now) {
+		return 0
+	}
+	return date.Sub(now)
+}
+
 // IsTransientDownloadError indica si conviene incluir una fila en los barridos.
 func IsTransientDownloadError(err error) bool {
 	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if errors.Is(err, context.Canceled) {
 		return false
 	}
 	if status, ok := HTTPStatus(err); ok {

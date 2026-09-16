@@ -9,6 +9,7 @@ import (
 	"io"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -21,11 +22,43 @@ import (
 
 const MaxPreviewRows = 1000
 
+type ProposalItem struct {
+	CompPago           string `json:"comp_pago"`
+	TipoDocIdent       string `json:"tipo_doc_ident"`
+	RUC                string `json:"ruc"`
+	RazonSocial        string `json:"razon_social"`
+	Fecha              string `json:"fecha"`
+	TipoDocRef         string `json:"tipo_doc_ref"`
+	SerieDocRef        string `json:"serie_doc_ref"`
+	NroDocRef          string `json:"nro_doc_ref"`
+	FechaRef           string `json:"fecha_ref"`
+	BIGravada          string `json:"bi_gravada"`
+	BIGravada10        string `json:"bi_gravada_10"`
+	BIGravYNoGrav      string `json:"bi_grav_y_no_grav"`
+	BINoGravada        string `json:"bi_no_gravada"`
+	AdqNoGravada       string `json:"adq_no_gravada"`
+	ICBPER             string `json:"icbper"`
+	IGV                string `json:"igv"`
+	GravYNoGravIGV     string `json:"grav_y_no_grav_igv"`
+	IGV10              string `json:"igv_10"`
+	ImporteTotal       string `json:"importe_total"`
+	ISC                string `json:"isc"`
+	NoGravIGV          string `json:"no_grav_igv"`
+	OtrosConceptos     string `json:"otros_conceptos"`
+	OtrosTributos      string `json:"otros_tributos"`
+	ValorAdquisiciones string `json:"valor_adquisiciones"`
+	Moneda             string `json:"moneda"`
+	Tipo               string `json:"tipo"`
+	Serie              string `json:"serie"`
+	Numero             string `json:"numero"`
+}
+
 type Preview struct {
 	FileName     string              `json:"file_name"`
 	Headers      []string            `json:"headers"`
 	Rows         [][]string          `json:"rows"`
 	Comprobantes []sunat.Comprobante `json:"comprobantes"`
+	Items        []ProposalItem      `json:"items"`
 	TotalRows    int                 `json:"total_rows"`
 	Truncated    bool                `json:"truncated"`
 }
@@ -52,7 +85,14 @@ func FromZIP(content []byte, book sunat.ProposalBook, period string) (Preview, e
 	if len(candidates) == 0 {
 		return Preview{}, errors.New("la propuesta no contiene un TXT o CSV para visualizar")
 	}
+	scores := make(map[*zip.File]float64, len(candidates))
+	for _, candidate := range candidates {
+		scores[candidate] = proposalCandidateScore(candidate)
+	}
 	sort.SliceStable(candidates, func(i, j int) bool {
+		if scores[candidates[i]] != scores[candidates[j]] {
+			return scores[candidates[i]] > scores[candidates[j]]
+		}
 		iTXT := strings.EqualFold(filepath.Ext(candidates[i].Name), ".txt")
 		jTXT := strings.EqualFold(filepath.Ext(candidates[j].Name), ".txt")
 		if iTXT != jTXT {
@@ -103,6 +143,7 @@ func FromZIP(content []byte, book sunat.ProposalBook, period string) (Preview, e
 	end := min(total, MaxPreviewRows)
 	rows := make([][]string, 0, end)
 	comprobantes := make([]sunat.Comprobante, 0, end)
+	items := make([]ProposalItem, 0, end)
 	for index, source := range dataRows[:end] {
 		row := make([]string, len(columns))
 		for columnIndex, column := range columns {
@@ -110,15 +151,83 @@ func FromZIP(content []byte, book sunat.ProposalBook, period string) (Preview, e
 		}
 		rows = append(rows, row)
 		comprobantes = append(comprobantes, buildComprobante(source, mapping, book, period, index))
+		items = append(items, buildProposalItem(source, book))
 	}
 	return Preview{
 		FileName:     filepath.Base(file.Name),
 		Headers:      headers,
 		Rows:         rows,
 		Comprobantes: comprobantes,
+		Items:        items,
 		TotalRows:    total,
 		Truncated:    total > MaxPreviewRows,
 	}, nil
+}
+
+// proposalCandidateScore conserva la heurística del original: favorece el
+// archivo con más campos por fila y descarta reportes auxiliares aunque su
+// nombre lo coloque primero alfabéticamente.
+func proposalCandidateScore(file *zip.File) float64 {
+	stream, err := file.Open()
+	if err != nil {
+		return -2000
+	}
+	raw, readErr := io.ReadAll(io.LimitReader(stream, 256<<10))
+	closeErr := stream.Close()
+	if readErr != nil || closeErr != nil {
+		return -2000
+	}
+	text, err := decodeText(raw)
+	if err != nil {
+		return -2000
+	}
+
+	upperName := strings.ToUpper(filepath.Base(file.Name))
+	report := strings.Contains(upperName, "REPORTE") ||
+		strings.Contains(upperName, "INCONSIST") ||
+		strings.Contains(upperName, "PARAMETR") ||
+		strings.Contains(upperName, "OBSERV") ||
+		contentLooksLikeReport(text)
+
+	separator := detectSeparator(text)
+	lines := strings.Split(text, "\n")
+	totalFields := 0
+	used := 0
+	for _, line := range lines {
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if line == "" {
+			continue
+		}
+		totalFields += strings.Count(line, string(separator)) + 1
+		used++
+		if used == 20 {
+			break
+		}
+	}
+	if used == 0 {
+		return -2000
+	}
+	score := float64(totalFields) / float64(used)
+	if report {
+		score -= 1000
+	}
+	return score
+}
+
+func contentLooksLikeReport(text string) bool {
+	lines := strings.Split(text, "\n")
+	for index := 0; index < min(len(lines), 12); index++ {
+		upper := strings.ToUpper(lines[index])
+		if strings.Contains(upper, "INCONSISTENCIA") ||
+			strings.Contains(upper, "REPORTE DE") ||
+			strings.Contains(upper, "NÚMERO DE RUC") ||
+			strings.Contains(upper, "NUMERO DE RUC") ||
+			strings.Contains(upper, "DATOS DEL CONTRIBUYENTE") ||
+			strings.Contains(upper, "SEMAFORO") {
+			return true
+		}
+	}
+	return false
 }
 
 type downloadMapping struct {
@@ -179,9 +288,29 @@ func isZeroAmount(value string) bool {
 
 func buildComprobante(row []string, mapping downloadMapping, book sunat.ProposalBook, period string, index int) sunat.Comprobante {
 	ruc := field(row, mapping.RUC)
+	if book == sunat.ProposalRVIE {
+		if emisorRuc := field(row, 0); emisorRuc != "" && len(emisorRuc) == 11 {
+			ruc = emisorRuc
+		}
+	}
 	tipo := sunat.NormalizeTipo(field(row, mapping.Tipo))
 	serie := strings.ToUpper(strings.ReplaceAll(field(row, mapping.Serie), " ", ""))
 	numero := sunat.NormalizeNumero(field(row, mapping.Numero))
+	razonSocial := ""
+	monto := ""
+	moneda := ""
+	if book == sunat.ProposalRCE {
+		razonSocial = field(row, 13)
+		monto = formatMoney(field(row, 24))
+		moneda = field(row, 25)
+	} else if book == sunat.ProposalRVIE {
+		razonSocial = field(row, 12)
+		monto = formatMoney(field(row, 25))
+		moneda = field(row, 26)
+	}
+	if moneda == "" {
+		moneda = "PEN"
+	}
 	return sunat.Comprobante{
 		ID:           fmt.Sprintf("%s-%s-%s-%s-%d", ruc, tipo, serie, numero, index),
 		RUC:          ruc,
@@ -190,9 +319,106 @@ func buildComprobante(row []string, mapping downloadMapping, book sunat.Proposal
 		Numero:       numero,
 		Libro:        mapping.Libro,
 		Periodo:      period,
+		RazonSocial:  razonSocial,
 		FechaEmision: field(row, mapping.Fecha),
+		Monto:        monto,
+		Moneda:       moneda,
 		SheetName:    mapping.Sheet,
 	}
+}
+
+func buildProposalItem(row []string, book sunat.ProposalBook) ProposalItem {
+	if book == sunat.ProposalRCE {
+		tipo := sunat.NormalizeTipo(field(row, 6))
+		serie := strings.ToUpper(strings.TrimSpace(field(row, 7)))
+		numero := sunat.NormalizeNumero(field(row, 9))
+		compPago := fmt.Sprintf("%s-%s", serie, numero)
+		if tipo != "" {
+			compPago = fmt.Sprintf("%s %s-%s", tipo, serie, numero)
+		}
+		return ProposalItem{
+			CompPago:           strings.TrimSpace(compPago),
+			Tipo:               tipo,
+			Serie:              serie,
+			Numero:             numero,
+			TipoDocIdent:       field(row, 11),
+			RUC:                field(row, 12),
+			RazonSocial:        field(row, 13),
+			Fecha:              field(row, 4),
+			TipoDocRef:         field(row, 28),
+			SerieDocRef:        field(row, 29),
+			NroDocRef:          field(row, 31),
+			FechaRef:           field(row, 27),
+			BIGravada:          formatMoney(field(row, 14)),
+			BIGravada10:        "0.00",
+			BIGravYNoGrav:      formatMoney(field(row, 16)),
+			BINoGravada:        formatMoney(field(row, 18)),
+			AdqNoGravada:       formatMoney(field(row, 20)),
+			ICBPER:             formatMoney(field(row, 22)),
+			IGV:                formatMoney(field(row, 15)),
+			GravYNoGravIGV:     formatMoney(field(row, 17)),
+			IGV10:              "0.00",
+			ImporteTotal:       formatMoney(field(row, 24)),
+			ISC:                formatMoney(field(row, 21)),
+			NoGravIGV:          formatMoney(field(row, 19)),
+			OtrosConceptos:     formatMoney(field(row, 23)),
+			OtrosTributos:      "0.00",
+			ValorAdquisiciones: formatMoney(field(row, 35)),
+			Moneda:             field(row, 25),
+		}
+	} else {
+		// RVIE (Ventas)
+		tipo := sunat.NormalizeTipo(field(row, 6))
+		serie := strings.ToUpper(strings.TrimSpace(field(row, 7)))
+		numero := sunat.NormalizeNumero(field(row, 8))
+		compPago := fmt.Sprintf("%s-%s", serie, numero)
+		if tipo != "" {
+			compPago = fmt.Sprintf("%s %s-%s", tipo, serie, numero)
+		}
+		return ProposalItem{
+			CompPago:           strings.TrimSpace(compPago),
+			Tipo:               tipo,
+			Serie:              serie,
+			Numero:             numero,
+			TipoDocIdent:       field(row, 10),
+			RUC:                field(row, 11),
+			RazonSocial:        field(row, 12),
+			Fecha:              field(row, 4),
+			TipoDocRef:         field(row, 29),
+			SerieDocRef:        field(row, 30),
+			NroDocRef:          field(row, 31),
+			FechaRef:           field(row, 28),
+			BIGravada:          formatMoney(field(row, 14)),
+			BIGravada10:        "0.00",
+			BIGravYNoGrav:      "0.00",
+			BINoGravada:        formatMoney(field(row, 19)),
+			AdqNoGravada:       formatMoney(field(row, 18)),
+			ICBPER:             formatMoney(field(row, 23)),
+			IGV:                formatMoney(field(row, 16)),
+			GravYNoGravIGV:     "0.00",
+			IGV10:              "0.00",
+			ImporteTotal:       formatMoney(field(row, 25)),
+			ISC:                formatMoney(field(row, 20)),
+			NoGravIGV:          "0.00",
+			OtrosConceptos:     formatMoney(field(row, 24)),
+			OtrosTributos:      formatMoney(field(row, 22)),
+			ValorAdquisiciones: formatMoney(field(row, 13)),
+			Moneda:             field(row, 26),
+		}
+	}
+}
+
+func formatMoney(val string) string {
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return "0.00"
+	}
+	clean := strings.ReplaceAll(val, ",", "")
+	f, err := strconv.ParseFloat(clean, 64)
+	if err != nil {
+		return val
+	}
+	return fmt.Sprintf("%.2f", f)
 }
 
 func field(row []string, index int) string {

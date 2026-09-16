@@ -77,4 +77,46 @@ func TestFromZIPDropsConceptColumnsWithoutValues(t *testing.T) {
 	if len(preview.Headers) != 4 || preview.TotalRows != 1 {
 		t.Fatalf("vista inesperada: %#v", preview)
 	}
+	if preview.Comprobantes[0].RUC != "20600000001" {
+		t.Fatalf("RUC RVIE inesperado: %#v", preview.Comprobantes[0])
+	}
+}
+
+func TestFromZIPPrefersDataOverAuxiliaryReport(t *testing.T) {
+	t.Parallel()
+
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	report, err := writer.Create("A_REPORTE.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := report.Write([]byte("REPORTE DE INCONSISTENCIAS|202608\n")); err != nil {
+		t.Fatal(err)
+	}
+	data, err := writer.Create("Z_DATOS.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := make([]string, 41)
+	row[0] = "20600000001"
+	row[4], row[6], row[7], row[9] = "01/08/2026", "01", "F001", "45"
+	row[12], row[13] = "20100000001", "PROVEEDOR"
+	if _, err := data.Write([]byte(strings.Join(row, "|") + "\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	preview, err := FromZIP(archive.Bytes(), sunat.ProposalRCE, "202608")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.FileName != "Z_DATOS.csv" {
+		t.Fatalf("archivo seleccionado = %q, want Z_DATOS.csv", preview.FileName)
+	}
+	if len(preview.Comprobantes) != 1 || preview.Comprobantes[0].Numero != "45" {
+		t.Fatalf("comprobantes inesperados: %#v", preview.Comprobantes)
+	}
 }

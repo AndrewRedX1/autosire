@@ -45,6 +45,17 @@ func (c *SunatClient) DownloadXMLFallback(ctx context.Context, comp Comprobante)
 	return c.downloadXMLFallback(ctx, comp, NormalizeTipo(comp.Tipo), nil)
 }
 
+// ProbeXMLFallback comprueba el endpoint alternativo con un comprobante real.
+// El motor solo lo usa cuando consultacpe rechazo el token, para no lanzar un
+// lote completo contra un recurso que tampoco esta autorizado.
+func (c *SunatClient) ProbeXMLFallback(ctx context.Context, comp Comprobante) error {
+	file, err := c.DownloadXMLFallback(ctx, comp)
+	if err != nil {
+		return err
+	}
+	return ValidateContentIntegrity(file.Content, DescargaXML)
+}
+
 func (c *SunatClient) downloadXMLFallback(
 	ctx context.Context,
 	comp Comprobante,
@@ -61,22 +72,36 @@ func (c *SunatClient) downloadXMLFallback(
 
 	_, fallbackBytes, fallbackErr := c.doRequestOnce(ctx, http.MethodGet, fallbackURL)
 	if fallbackErr != nil {
-		if primaryErr != nil {
-			return nil, fmt.Errorf(
-				"descargando XML (primario: %v, respaldo: %w)",
-				primaryErr,
-				fallbackErr,
-			)
-		}
-		return nil, fmt.Errorf("descargando XML desde controlcpe: %w", fallbackErr)
+		return nil, selectXMLDownloadError(primaryErr, fallbackErr)
 	}
 
 	file, parseErr := c.processXmlResponseBody(fallbackBytes, comp, tipoOrig)
 	if parseErr != nil {
-		return nil, fmt.Errorf("error procesando respuesta de XML de SUNAT: %w", parseErr)
+		return nil, selectXMLDownloadError(primaryErr, parseErr)
 	}
 
 	return file, nil
+}
+
+// selectXMLDownloadError conserva la precedencia del macro: el error
+// transitorio del respaldo gana; si no, se conserva el transitorio primario
+// para que el motor reintente la fila. Un error definitivo del fallback no
+// debe ocultar un 429/5xx/timeout ocurrido en consultacpe.
+func selectXMLDownloadError(primaryErr, fallbackErr error) error {
+	if primaryErr == nil {
+		return fmt.Errorf("descargando XML desde controlcpe: %w", fallbackErr)
+	}
+	if IsTransientDownloadError(fallbackErr) {
+		return fmt.Errorf("descargando XML desde controlcpe: %w", fallbackErr)
+	}
+	if IsTransientDownloadError(primaryErr) {
+		return fmt.Errorf("descargando XML desde consultacpe: %w", primaryErr)
+	}
+	return fmt.Errorf(
+		"descargando XML (primario: %v, respaldo: %w)",
+		primaryErr,
+		fallbackErr,
+	)
 }
 
 // processXmlResponseBody procesa la respuesta que puede ser JSON Base64 o binario directo (ZIP/XML)
