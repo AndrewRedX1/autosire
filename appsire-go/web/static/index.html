@@ -682,9 +682,24 @@
   <!-- Visor de Archivos (Dialog) -->
   <dialog class="file-viewer" id="fileViewer" aria-labelledby="fileViewerTitle">
     <div class="file-viewer-bar">
-      <strong id="fileViewerTitle">Visor de Archivo</strong>
-      <button type="button" class="viewer-close" id="fileViewerClose" aria-label="Cerrar visor">✕ Cerrar</button>
+      <div class="file-viewer-heading">
+        <span class="file-viewer-icon" aria-hidden="true">▤</span>
+        <strong id="fileViewerTitle">Visor de Archivo</strong>
+      </div>
+      <div class="file-viewer-actions">
+        <div class="file-viewer-tabs" id="fileViewerTabs" hidden>
+          <button type="button" class="viewer-tab active" id="fileViewerSummaryTab">Comprobante</button>
+          <button type="button" class="viewer-tab" id="fileViewerRawTab">XML original</button>
+        </div>
+        <button type="button" class="viewer-close" id="fileViewerClose" aria-label="Cerrar visor">✕ Cerrar</button>
+      </div>
     </div>
+    <div class="file-viewer-loading" id="fileViewerLoading" hidden>
+      <span class="spinner"></span>
+      <span>Interpretando comprobante electrónico…</span>
+    </div>
+    <div class="invoice-viewer" id="invoiceViewer" hidden></div>
+    <pre class="xml-source-viewer" id="xmlSourceViewer" hidden></pre>
     <iframe id="fileViewerFrame" title="Contenido del archivo"></iframe>
   </dialog>
 

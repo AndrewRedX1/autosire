@@ -1,9 +1,16 @@
 package api
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"appsire-go/internal/engine"
+	"appsire-go/internal/filemanager"
 	"appsire-go/internal/sunat"
 )
 
@@ -38,6 +45,43 @@ func TestValidateProposalBindingRejectsChangedIdentity(t *testing.T) {
 				t.Fatalf("validateProposalBinding() error = %v, wantError %t", err, tt.wantError)
 			}
 		})
+	}
+}
+
+func TestHandleXMLPreviewParsesFileInsideDownloads(t *testing.T) {
+	t.Parallel()
+	baseDir := t.TempDir()
+	xmlPath := filepath.Join(baseDir, "factura.xml")
+	xmlData := `<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"><cbc:ID>F001-1</cbc:ID><cbc:InvoiceTypeCode>01</cbc:InvoiceTypeCode><cbc:DocumentCurrencyCode>PEN</cbc:DocumentCurrencyCode></Invoice>`
+	if err := os.WriteFile(xmlPath, []byte(xmlData), 0600); err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{fileManager: filemanager.NewFileManager(baseDir)}
+	req := httptest.NewRequest(http.MethodGet, "/api/files/xml-preview?path="+url.QueryEscape(xmlPath), nil)
+	response := httptest.NewRecorder()
+
+	server.HandleXMLPreview(response, req)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"number":"F001-1"`) {
+		t.Fatalf("respuesta inesperada: %s", response.Body.String())
+	}
+}
+
+func TestHandleXMLPreviewRejectsOutsidePath(t *testing.T) {
+	t.Parallel()
+	baseDir := t.TempDir()
+	server := &Server{fileManager: filemanager.NewFileManager(baseDir)}
+	outside := filepath.Join(filepath.Dir(baseDir), "outside.xml")
+	req := httptest.NewRequest(http.MethodGet, "/api/files/xml-preview?path="+url.QueryEscape(outside), nil)
+	response := httptest.NewRecorder()
+
+	server.HandleXMLPreview(response, req)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", response.Code)
 	}
 }
 

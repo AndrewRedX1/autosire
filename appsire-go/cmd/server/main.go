@@ -107,6 +107,7 @@ func main() {
 	mux.HandleFunc("/api/files/open-folder", server.RequireSession(server.HandleOpenFolder))
 	mux.HandleFunc("/api/files/download-zip", server.RequireSession(server.HandleDownloadZip))
 	mux.HandleFunc("/api/files/view", server.RequireSession(server.HandleViewFile))
+	mux.HandleFunc("/api/files/xml-preview", server.RequireSession(server.HandleXMLPreview))
 	// Rutas de Ciclo de Vida de la Ventana (Watchdog de escritorio)
 	var (
 		shutdownMu    sync.Mutex

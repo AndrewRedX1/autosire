@@ -23,6 +23,7 @@ import (
 	"appsire-go/internal/session"
 	"appsire-go/internal/sirepreview"
 	"appsire-go/internal/sunat"
+	"appsire-go/internal/xmlpreview"
 )
 
 // Server almacena las dependencias y servicios de la API
@@ -624,26 +625,9 @@ func (s *Server) HandleViewFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requestedPath, err := filepath.Abs(r.URL.Query().Get("path"))
-	if err != nil {
-		respondError(w, http.StatusBadRequest, "Ruta de archivo inválida")
-		return
-	}
-	basePath, err := filepath.Abs(s.fileManager.BaseDir)
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, "No se pudo resolver la carpeta de descargas")
-		return
-	}
-	relativePath, err := filepath.Rel(basePath, requestedPath)
-	outsideBase := err != nil ||
-		relativePath == ".." ||
-		strings.HasPrefix(relativePath, ".."+string(filepath.Separator))
-	if outsideBase {
-		respondError(w, http.StatusBadRequest, "El archivo no pertenece a las descargas")
-		return
-	}
-	if _, err := os.Stat(requestedPath); err != nil {
-		respondError(w, http.StatusNotFound, "Archivo no encontrado")
+	requestedPath, status, message := s.resolveDownloadedFile(r.URL.Query().Get("path"))
+	if status != 0 {
+		respondError(w, status, message)
 		return
 	}
 
@@ -658,6 +642,64 @@ func (s *Server) HandleViewFile(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename=%q", disposition, filepath.Base(requestedPath)))
 	http.ServeFile(w, r, requestedPath)
+}
+
+// HandleXMLPreview transforma un XML UBL local en un modelo de factura para
+// el visor. Nunca admite rutas fuera de la carpeta de descargas activa.
+func (s *Server) HandleXMLPreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		respondError(w, http.StatusMethodNotAllowed, "Método no permitido")
+		return
+	}
+	requestedPath, status, message := s.resolveDownloadedFile(r.URL.Query().Get("path"))
+	if status != 0 {
+		respondError(w, status, message)
+		return
+	}
+	if !strings.EqualFold(filepath.Ext(requestedPath), ".xml") {
+		respondError(w, http.StatusBadRequest, "El archivo seleccionado no es XML")
+		return
+	}
+	file, err := os.Open(requestedPath)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "No se pudo abrir el XML")
+		return
+	}
+	defer file.Close()
+	preview, err := xmlpreview.ParseReader(file, 20<<20)
+	if err != nil {
+		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"preview": preview,
+	})
+}
+
+func (s *Server) resolveDownloadedFile(rawPath string) (string, int, string) {
+	if strings.TrimSpace(rawPath) == "" {
+		return "", http.StatusBadRequest, "Ruta de archivo inválida"
+	}
+	requestedPath, err := filepath.Abs(rawPath)
+	if err != nil {
+		return "", http.StatusBadRequest, "Ruta de archivo inválida"
+	}
+	basePath, err := filepath.Abs(s.fileManager.BaseDir)
+	if err != nil {
+		return "", http.StatusInternalServerError, "No se pudo resolver la carpeta de descargas"
+	}
+	relativePath, err := filepath.Rel(basePath, requestedPath)
+	outsideBase := err != nil || relativePath == ".." ||
+		strings.HasPrefix(relativePath, ".."+string(filepath.Separator))
+	if outsideBase {
+		return "", http.StatusBadRequest, "El archivo no pertenece a las descargas"
+	}
+	info, err := os.Stat(requestedPath)
+	if err != nil || info.IsDir() {
+		return "", http.StatusNotFound, "Archivo no encontrado"
+	}
+	return requestedPath, 0, ""
 }
 
 func serveZIPPreview(w http.ResponseWriter, path string) bool {

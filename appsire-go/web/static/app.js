@@ -213,6 +213,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let sseSource = null;
   const downloadedFiles = new Map();
   let currentProposalView = null;
+  let currentViewerPath = '';
+  let currentViewerRawXML = '';
 
   initTheme();
   restoreRememberedLogin();
@@ -474,6 +476,8 @@ document.addEventListener('DOMContentLoaded', () => {
     $('fileViewer').addEventListener('click', (event) => {
       if (event.target === $('fileViewer')) closeFileViewer();
     });
+    $('fileViewerSummaryTab').addEventListener('click', () => showXMLViewerTab('summary'));
+    $('fileViewerRawTab').addEventListener('click', () => showXMLViewerTab('raw'));
 
     $('btnOpenFolder').addEventListener('click', openFolder);
     $('btnDownloadZip').addEventListener('click', () => {
@@ -1167,7 +1171,10 @@ document.addEventListener('DOMContentLoaded', () => {
         let xmlCell = '<span class="xml-badge-none">—</span>';
         if (xmlStatus) {
           if (xmlStatus.exito) {
-            xmlCell = `<span class="xml-badge-ok" title="XML obtenido con éxito${xmlStatus.nom_archivo ? ': ' + escapeHtml(xmlStatus.nom_archivo) : ''}">✓</span>`;
+            const xmlPath = xmlStatus.ruta_local ? encodeURIComponent(xmlStatus.ruta_local) : '';
+            xmlCell = xmlPath
+              ? `<button type="button" class="xml-badge-ok" data-view-path="${xmlPath}" data-view-type="XML" aria-label="Visualizar comprobante XML" title="Visualizar comprobante${xmlStatus.nom_archivo ? ': ' + escapeHtml(xmlStatus.nom_archivo) : ''}">✓</button>`
+              : `<span class="xml-badge-ok" title="XML obtenido con éxito">✓</span>`;
           } else {
             const errTooltip = xmlStatus.error || 'Error al descargar XML de SUNAT';
             xmlCell = `<span class="xml-badge-err" title="${escapeHtml(errTooltip)}">—</span>`;
@@ -1810,14 +1817,208 @@ document.addEventListener('DOMContentLoaded', () => {
   function handleRecordAction(event) {
     const button = event.target.closest('[data-view-path]');
     if (!button) return;
-    $('fileViewerTitle').textContent = `Visor ${button.dataset.viewType || 'de archivo'}`;
+    const type = String(button.dataset.viewType || '').toUpperCase();
+    if (type === 'XML') {
+      openXMLViewer(button.dataset.viewPath);
+      return;
+    }
+    resetFileViewer();
+    $('fileViewerTitle').textContent = `Visor ${type || 'de archivo'}`;
     $('fileViewerFrame').src = `/api/files/view?path=${button.dataset.viewPath}`;
+    $('fileViewerFrame').hidden = false;
     $('fileViewer').showModal();
   }
 
   function closeFileViewer() {
     $('fileViewer').close();
+    resetFileViewer();
+  }
+
+  function resetFileViewer() {
+    currentViewerPath = '';
+    currentViewerRawXML = '';
     $('fileViewerFrame').src = 'about:blank';
+    $('fileViewerFrame').hidden = true;
+    $('invoiceViewer').hidden = true;
+    $('invoiceViewer').innerHTML = '';
+    $('xmlSourceViewer').hidden = true;
+    $('xmlSourceViewer').textContent = '';
+    $('fileViewerLoading').hidden = true;
+    $('fileViewerTabs').hidden = true;
+    $('fileViewerSummaryTab').classList.add('active');
+    $('fileViewerRawTab').classList.remove('active');
+  }
+
+  async function openXMLViewer(encodedPath) {
+    resetFileViewer();
+    currentViewerPath = encodedPath;
+    $('fileViewerTitle').textContent = 'Comprobante electrónico';
+    $('fileViewerTabs').hidden = false;
+    $('fileViewerLoading').hidden = false;
+    $('fileViewer').showModal();
+
+    try {
+      const response = await apiFetch(`/api/files/xml-preview?path=${encodedPath}`);
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'No se pudo interpretar el XML');
+      }
+      if (currentViewerPath !== encodedPath || !$('fileViewer').open) return;
+      $('fileViewerTitle').textContent = `${data.preview.document_type || 'Comprobante electrónico'} · ${data.preview.number || ''}`;
+      $('invoiceViewer').innerHTML = renderInvoicePreview(data.preview);
+      $('invoiceViewer').hidden = false;
+    } catch (error) {
+      if (currentViewerPath !== encodedPath || !$('fileViewer').open) return;
+      $('invoiceViewer').innerHTML = `
+        <div class="invoice-viewer-error">
+          <strong>No se pudo representar el comprobante</strong>
+          <span>${escapeHtml(error.message)}</span>
+        </div>`;
+      $('invoiceViewer').hidden = false;
+    } finally {
+      if (currentViewerPath === encodedPath) $('fileViewerLoading').hidden = true;
+    }
+  }
+
+  async function showXMLViewerTab(tab) {
+    const raw = tab === 'raw';
+    $('fileViewerSummaryTab').classList.toggle('active', !raw);
+    $('fileViewerRawTab').classList.toggle('active', raw);
+    $('invoiceViewer').hidden = raw;
+    $('xmlSourceViewer').hidden = !raw;
+    if (!raw || currentViewerRawXML || !currentViewerPath) return;
+
+    $('fileViewerLoading').hidden = false;
+    try {
+      const response = await apiFetch(`/api/files/view?path=${currentViewerPath}`);
+      if (!response.ok) throw new Error('No se pudo leer el XML original');
+      currentViewerRawXML = formatXMLSource(await response.text());
+      $('xmlSourceViewer').textContent = currentViewerRawXML;
+    } catch (error) {
+      $('xmlSourceViewer').textContent = error.message;
+    } finally {
+      $('fileViewerLoading').hidden = true;
+    }
+  }
+
+  function renderInvoicePreview(invoice) {
+    const supplier = invoice.supplier || {};
+    const customer = invoice.customer || {};
+    const totals = invoice.totals || {};
+    const lines = invoice.lines || [];
+    const currency = invoice.currency || 'PEN';
+    const notes = (invoice.notes || []).filter(Boolean);
+    const reference = invoice.reference
+      ? `<div class="invoice-reference"><strong>Documento relacionado:</strong> ${escapeHtml(invoice.reference)}${invoice.reason ? ` · ${escapeHtml(invoice.reason)}` : ''}</div>`
+      : '';
+
+    return `
+      <article class="commercial-invoice">
+        <header class="invoice-header">
+          <div class="invoice-company">
+            <span class="invoice-eyebrow">EMISOR</span>
+            <h2>${escapeHtml(supplier.name || 'Emisor no informado')}</h2>
+            <p>RUC ${escapeHtml(supplier.ruc || '—')}</p>
+            ${supplier.address ? `<small>${escapeHtml(supplier.address)}</small>` : ''}
+          </div>
+          <div class="invoice-document-box">
+            <span>${escapeHtml((invoice.document_type || 'Comprobante electrónico').toUpperCase())}</span>
+            <strong>${escapeHtml(invoice.number || '—')}</strong>
+            <small>Código SUNAT ${escapeHtml(invoice.document_type_code || '—')}</small>
+          </div>
+        </header>
+
+        <section class="invoice-meta-grid">
+          ${invoiceMeta('Fecha de emisión', formatInvoiceDate(invoice.issue_date))}
+          ${invoiceMeta('Fecha de vencimiento', formatInvoiceDate(invoice.due_date) || '—')}
+          ${invoiceMeta('Moneda', currencyLabel(currency))}
+          ${invoiceMeta('Tipo de operación', invoice.operation_type || '—')}
+        </section>
+
+        <section class="invoice-party-card">
+          <span class="invoice-eyebrow">CLIENTE / ADQUIRIENTE</span>
+          <strong>${escapeHtml(customer.name || 'No informado')}</strong>
+          <span>RUC ${escapeHtml(customer.ruc || '—')}</span>
+          ${customer.address ? `<small>${escapeHtml(customer.address)}</small>` : ''}
+        </section>
+
+        ${reference}
+
+        <section class="invoice-lines-wrap">
+          <table class="invoice-lines">
+            <thead><tr><th>#</th><th>Descripción</th><th>Cantidad</th><th>Precio unit.</th><th>IGV</th><th>Importe</th></tr></thead>
+            <tbody>
+              ${lines.length ? lines.map((line, index) => `
+                <tr>
+                  <td>${escapeHtml(line.number || String(index + 1))}</td>
+                  <td><strong>${escapeHtml(line.description || 'Sin descripción')}</strong>${line.code ? `<small>Código: ${escapeHtml(line.code)}</small>` : ''}</td>
+                  <td class="invoice-number">${escapeHtml(line.quantity || '—')} ${escapeHtml(line.unit_code || '')}</td>
+                  <td class="invoice-number">${formatInvoiceAmount(line.unit_price, currency)}</td>
+                  <td class="invoice-number">${formatInvoiceAmount(line.tax_amount, currency)}</td>
+                  <td class="invoice-number"><strong>${formatInvoiceAmount(line.amount, currency)}</strong></td>
+                </tr>`).join('') : '<tr><td colspan="6" class="invoice-empty">El XML no contiene líneas de detalle.</td></tr>'}
+            </tbody>
+          </table>
+        </section>
+
+        <footer class="invoice-footer">
+          <div class="invoice-notes">
+            <span class="invoice-eyebrow">OBSERVACIONES</span>
+            ${notes.length ? notes.map((note) => `<p>${escapeHtml(note)}</p>`).join('') : '<p>Sin observaciones.</p>'}
+          </div>
+          <dl class="invoice-totals">
+            ${invoiceTotal('Valor de venta', totals.tax_exclusive || totals.line_extension, currency)}
+            ${invoiceTotal('IGV / tributos', totals.tax, currency)}
+            ${invoiceTotal('Descuentos', totals.allowance, currency, true)}
+            ${invoiceTotal('Otros cargos', totals.charge, currency, true)}
+            ${invoiceTotal('Anticipos', totals.prepaid, currency, true)}
+            <div class="invoice-total-payable"><dt>Importe total</dt><dd>${formatInvoiceAmount(totals.payable || totals.tax_inclusive, currency)}</dd></div>
+          </dl>
+        </footer>
+      </article>`;
+  }
+
+  function invoiceMeta(label, value) {
+    return `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value || '—')}</strong></div>`;
+  }
+
+  function invoiceTotal(label, value, currency, optional = false) {
+    if (optional && !value) return '';
+    return `<div><dt>${escapeHtml(label)}</dt><dd>${formatInvoiceAmount(value, currency)}</dd></div>`;
+  }
+
+  function formatInvoiceAmount(value, currency) {
+    if (value === undefined || value === null || value === '') return '—';
+    const number = Number(String(value).replace(/,/g, ''));
+    if (!Number.isFinite(number)) return `${escapeHtml(currency || '')} ${escapeHtml(String(value))}`.trim();
+    try {
+      return new Intl.NumberFormat('es-PE', { style: 'currency', currency: currency || 'PEN' }).format(number);
+    } catch {
+      return `${escapeHtml(currency || '')} ${number.toFixed(2)}`.trim();
+    }
+  }
+
+  function currencyLabel(currency) {
+    const labels = { PEN: 'Soles (PEN)', USD: 'Dólares estadounidenses (USD)', EUR: 'Euros (EUR)' };
+    return labels[currency] || currency || '—';
+  }
+
+  function formatInvoiceDate(value) {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return match ? `${match[3]}/${match[2]}/${match[1]}` : String(value || '');
+  }
+
+  function formatXMLSource(source) {
+    const compact = String(source || '').replace(/>\s*</g, '><').trim();
+    let depth = 0;
+    return compact.replace(/(<[^>]+>)/g, '\n$1').split('\n').filter(Boolean).map((token) => {
+      const closes = /^<\//.test(token);
+      const selfClosing = /\/>$/.test(token) || /^<\?/.test(token) || /^<!/.test(token);
+      if (closes) depth = Math.max(0, depth - 1);
+      const line = `${'  '.repeat(depth)}${token}`;
+      if (!closes && !selfClosing && /^<[^/][^>]*>$/.test(token) && !/<\/[^>]+>$/.test(token)) depth++;
+      return line;
+    }).join('\n').trim();
   }
 
   function fileKey(comp, tipo) {
