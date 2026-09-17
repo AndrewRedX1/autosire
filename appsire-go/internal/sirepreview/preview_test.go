@@ -19,7 +19,7 @@ func TestFromZIPParsesPipeDelimitedProposal(t *testing.T) {
 	first := make([]string, 41)
 	first[0] = "20600000001"
 	first[4], first[6], first[7], first[9] = "01/08/2026", "01", "F001", "1045"
-	first[12], first[13], first[24], first[25] = "20100000001", "PROVEEDOR UNO", "118.00", "PEN"
+	first[12], first[13], first[24], first[25], first[26] = "20100000001", "PROVEEDOR UNO", "118.00", "USD", "3.356"
 	first[14], first[15] = "100.00", "18.00"
 	first[21] = "0.00"
 	second := make([]string, 41)
@@ -49,6 +49,9 @@ func TestFromZIPParsesPipeDelimitedProposal(t *testing.T) {
 	}
 	if preview.Comprobantes[0].RUC != "20100000001" || preview.Comprobantes[0].Numero != "1045" {
 		t.Fatalf("comprobante inesperado: %#v", preview.Comprobantes[0])
+	}
+	if preview.Items[0].Moneda != "USD" || preview.Items[0].TipoCambio != "3.356" {
+		t.Fatalf("moneda/tipo de cambio inesperados: %#v", preview.Items[0])
 	}
 }
 

@@ -221,8 +221,24 @@ document.addEventListener('DOMContentLoaded', () => {
   populatePeriodsCombo();
   initSidebarState();
   bindEvents();
+  loadBuildInfo();
   checkSession();
   setInterval(checkLicenseHeartbeat, 5 * 60 * 1000);
+
+  async function loadBuildInfo() {
+    const label = $('appBuildInfo');
+    if (!label) return;
+    try {
+      const response = await fetch('/api/app/info', { cache: 'no-store' });
+      const info = await response.json();
+      const version = info?.version || 'dev';
+      const builtAt = info?.built_at || 'sin fecha';
+      label.textContent = `v${version} · ${builtAt}`;
+      label.title = `Ejecutable ${version}, compilado ${builtAt}`;
+    } catch (_) {
+      label.textContent = 'Versión local no identificada';
+    }
+  }
 
   // =========================================================================
   // VISTAS Y NAVEGACIÓN
@@ -464,9 +480,12 @@ document.addEventListener('DOMContentLoaded', () => {
     legacyDownloadCdr.addEventListener('click', () => startDownload('CDR'));
     legacyCancelDownload.addEventListener('click', cancelDownload);
 
-    // Botones de descarga de XML en propuestas RCE y RVIE
-    $('btnDescargaXmlRce')?.addEventListener('click', () => startProposalXmlDownload('RCE'));
-    $('btnDescargaXmlRvie')?.addEventListener('click', () => startProposalXmlDownload('RVIE'));
+    for (const book of ['RCE', 'RVIE']) {
+      const suffix = book === 'RCE' ? 'Rce' : 'Rvie';
+      for (const [buttonName, type] of [['Xml', 'XML'], ['Cdr', 'CDR'], ['Pdf', 'PDF'], ['Desc', 'DESC']]) {
+        $(`btnDescarga${buttonName}${suffix}`)?.addEventListener('click', () => startProposalDownload(book, type));
+      }
+    }
 
     $('uploadedRecordsBody').addEventListener('click', handleRecordAction);
     $('proposalPreviewBodyRce')?.addEventListener('click', handleRecordAction);
@@ -957,8 +976,22 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentProposalItemsRvie = [];
   let currentProposalContextRce = null;
   let currentProposalContextRvie = null;
-  const xmlDownloadStatusMapRce = new Map();
-  const xmlDownloadStatusMapRvie = new Map();
+  const proposalStatusMapsRce = createProposalStatusMaps();
+  const proposalStatusMapsRvie = createProposalStatusMaps();
+
+  function createProposalStatusMaps() {
+    return {
+      XML: new Map(),
+      CDR: new Map(),
+      PDF: new Map(),
+      DESC: new Map()
+    };
+  }
+
+  function proposalStatusMap(isRce, type) {
+    const maps = isRce ? proposalStatusMapsRce : proposalStatusMapsRvie;
+    return maps[type];
+  }
 
   function clearProposalState() {
     rceComprobantes = [];
@@ -967,8 +1000,8 @@ document.addEventListener('DOMContentLoaded', () => {
     currentProposalItemsRvie = [];
     currentProposalContextRce = null;
     currentProposalContextRvie = null;
-    xmlDownloadStatusMapRce.clear();
-    xmlDownloadStatusMapRvie.clear();
+    Object.values(proposalStatusMapsRce).forEach((statusMap) => statusMap.clear());
+    Object.values(proposalStatusMapsRvie).forEach((statusMap) => statusMap.clear());
     for (const id of ['proposalPreviewWrapRce', 'proposalPreviewWrapRvie']) {
       const element = $(id);
       if (element) element.style.display = 'none';
@@ -1108,13 +1141,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const foot = $(isRce ? 'proposalPreviewFootRce' : 'proposalPreviewFootRvie');
     const metaCount = $(isRce ? 'proposalMetaCountRce' : 'proposalMetaCountRvie');
     const metaTotal = $(isRce ? 'proposalMetaTotalRce' : 'proposalMetaTotalRvie');
-    const statusMap = isRce ? xmlDownloadStatusMapRce : xmlDownloadStatusMapRvie;
+    const xmlStatusMap = proposalStatusMap(isRce, 'XML');
+    const cdrStatusMap = proposalStatusMap(isRce, 'CDR');
+    const pdfStatusMap = proposalStatusMap(isRce, 'PDF');
+    const descriptionStatusMap = proposalStatusMap(isRce, 'DESC');
 
     if (metaCount) metaCount.textContent = `${items.length} comprobantes`;
 
     if (!items.length) {
       if (body) {
-        body.innerHTML = '<tr><td colspan="26" style="text-align:center; padding: 24px; color: var(--notion-text-subtle);">No se encontraron comprobantes en la propuesta oficial.</td></tr>';
+        body.innerHTML = '<tr><td colspan="31" style="text-align:center; padding: 24px; color: var(--notion-text-subtle);">No se encontraron comprobantes en la propuesta oficial.</td></tr>';
       }
       if (foot) foot.innerHTML = '';
       if (metaTotal) metaTotal.textContent = 'Total: S/ 0.00';
@@ -1165,31 +1201,30 @@ document.addEventListener('DOMContentLoaded', () => {
         sumOtrosTributos += parseNum(it.otros_tributos);
         sumValorAdquisiciones += parseNum(it.valor_adquisiciones);
 
-        // Estado del XML para esta fila
         const compKey = getCompKey(it);
-        const xmlStatus = statusMap.get(compKey);
-        let xmlCell = '<span class="xml-badge-none">—</span>';
-        if (xmlStatus) {
-          if (xmlStatus.exito) {
-            const xmlPath = xmlStatus.ruta_local ? encodeURIComponent(xmlStatus.ruta_local) : '';
-            xmlCell = xmlPath
-              ? `<button type="button" class="xml-badge-ok" data-view-path="${xmlPath}" data-view-type="XML" aria-label="Visualizar comprobante XML" title="Visualizar comprobante${xmlStatus.nom_archivo ? ': ' + escapeHtml(xmlStatus.nom_archivo) : ''}">✓</button>`
-              : `<span class="xml-badge-ok" title="XML obtenido con éxito">✓</span>`;
-          } else {
-            const errTooltip = xmlStatus.error || 'Error al descargar XML de SUNAT';
-            xmlCell = `<span class="xml-badge-err" title="${escapeHtml(errTooltip)}">—</span>`;
-          }
-        }
+        const xmlCell = renderProposalArtifactStatus(xmlStatusMap.get(compKey), 'XML');
+        const cdrCell = renderProposalArtifactStatus(
+          cdrStatusMap.get(compKey),
+          'CDR',
+          String(it.serie || '').toUpperCase().startsWith('E')
+        );
+        const pdfCell = renderProposalArtifactStatus(pdfStatusMap.get(compKey), 'PDF');
+        const descriptionCell = renderProposalDescription(descriptionStatusMap.get(compKey));
 
         return `
           <tr>
             <td style="text-align:center; color: var(--notion-text-subtle); font-weight: 500;">${idx + 1}</td>
+            <td class="col-artifact">${xmlCell}</td>
+            <td class="col-artifact">${cdrCell}</td>
+            <td class="col-artifact">${pdfCell}</td>
             <td><strong>${escapeHtml(it.comp_pago || '—')}</strong></td>
-            <td class="col-xml">${xmlCell}</td>
+            <td class="col-description">${descriptionCell}</td>
             <td style="text-align:center;">${escapeHtml(it.tipo_doc_ident || '—')}</td>
             <td><code>${escapeHtml(it.ruc || '—')}</code></td>
             <td style="max-width:260px; overflow:hidden; text-overflow:ellipsis;" title="${escapeHtml(it.razon_social || '')}">${escapeHtml(it.razon_social || '—')}</td>
             <td style="text-align:center;">${escapeHtml(it.fecha || '—')}</td>
+            <td style="text-align:center;">${escapeHtml(it.moneda || 'PEN')}</td>
+            <td class="num">${escapeHtml(it.tipo_cambio || '—')}</td>
             <td style="text-align:center;">${escapeHtml(it.tipo_doc_ref || '—')}</td>
             <td style="text-align:center;">${escapeHtml(it.serie_doc_ref || '—')}</td>
             <td style="text-align:center;">${escapeHtml(it.nro_doc_ref || '—')}</td>
@@ -1221,7 +1256,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (foot) {
       foot.innerHTML = `
         <tr>
-          <td colspan="11" style="text-align: right; font-weight: 700; text-transform: uppercase;">TOTALES GENERALES (${items.length}):</td>
+          <td colspan="16" style="text-align: right; font-weight: 700; text-transform: uppercase;">TOTALES GENERALES EN SOLES (${items.length}):</td>
           <td class="num">${fmtMoney(sumBIGravada)}</td>
           <td class="num">${fmtMoney(sumBIGravada10)}</td>
           <td class="num">${fmtMoney(sumBIGravYNoGrav)}</td>
@@ -1242,11 +1277,59 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function renderProposalArtifactStatus(status, type, notApplicable = false) {
+    if (notApplicable) {
+      return '<span class="artifact-badge-na" title="Los comprobantes de serie E no tienen CDR">N/A</span>';
+    }
+    if (!status) {
+      return '<span class="artifact-badge-none">—</span>';
+    }
+    if (!status.exito) {
+      const error = status.error || `No se pudo obtener ${type} de SUNAT`;
+      return `<span class="artifact-badge-err" title="${escapeHtml(error)}">—</span>`;
+    }
+    const path = status.ruta_local ? encodeURIComponent(status.ruta_local) : '';
+    const title = status.nom_archivo ? `${type}: ${status.nom_archivo}` : `${type} obtenido con éxito`;
+    if (!path) {
+      return `<span class="artifact-badge-ok" title="${escapeHtml(title)}">✓</span>`;
+    }
+    return `<button type="button" class="artifact-badge-ok" data-view-path="${path}" data-view-type="${type}" aria-label="Visualizar ${type}" title="${escapeHtml(title)}">✓</button>`;
+  }
+
+  function renderProposalDescription(status) {
+    if (!status) {
+      return '<span class="description-empty">—</span>';
+    }
+    if (!status.exito) {
+      const error = status.error || 'SUNAT no devolvió una descripción';
+      return `<span class="description-error" title="${escapeHtml(error)}">Sin información</span>`;
+    }
+    const description = String(status.descripcion || '').trim();
+    const plate = String(status.placa || '').trim();
+    const plateText = plate ? `<span class="description-plate">Placa: ${escapeHtml(plate)}</span>` : '';
+    return `<span class="description-text">${escapeHtml(description || 'Sin descripción')}</span>${plateText}`;
+  }
+
   // =========================================================================
-  // MODAL DE CARGA Y DESCARGA MASIVA DE XML DESDE PROPUESTAS SIRE
+  // DESCARGAS MASIVAS DESDE PROPUESTAS SIRE
   // =========================================================================
 
-  function showXmlProgressModal(onCancel) {
+  function proposalDownloadLabel(type) {
+    return type === 'DESC' ? 'descripciones' : type;
+  }
+
+  async function confirmSunatUnavailable() {
+    return showSweetAlert({
+      title: 'SUNAT no está respondiendo',
+      text: 'SUNAT no está respondiendo en este momento.\n\nSe intentó conectar con el servicio de SUNAT para descargar comprobantes y está fuera de servicio.\n\nNo es una falla del aplicativo ni de su computadora: son intermitencias del servicio de SUNAT. Lo recomendable es esperar unos minutos y volver a intentarlo.\n\nLos comprobantes que ya descargó no se pierden; al reintentar solo se bajan los que faltan.\n\n¿Desea intentar la descarga de todas formas?',
+      type: 'warning',
+      confirmButtonText: 'Sí',
+      showCancelButton: true,
+      cancelButtonText: 'No'
+    });
+  }
+
+  function showProposalProgressModal(type, onCancel) {
     const existing = document.getElementById('xmlProgressOverlay');
     if (existing) existing.remove();
 
@@ -1259,14 +1342,14 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="notion-swal-icon info" style="margin-bottom: 12px;">
           <span class="spinner" style="width: 26px; height: 26px; border-width: 3px; display: inline-block;"></span>
         </div>
-        <h2 class="notion-swal-title" style="margin-bottom: 4px;">Descargando Comprobantes XML</h2>
+        <h2 class="notion-swal-title" style="margin-bottom: 4px;">Obteniendo ${escapeHtml(proposalDownloadLabel(type))}</h2>
         <div class="notion-swal-text" id="xmlProgressMsg" style="margin-bottom: 16px; font-size: 0.82rem; color: var(--notion-text-muted);">
           Consultando servidores SUNAT en paralelo...
         </div>
 
         <div style="width: 100%; margin-bottom: 14px;">
           <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px;">
-            <span style="font-size: 0.78rem; font-weight: 600; color: var(--notion-text-muted);" id="xmlProgressCount">0 / 0 obtenidos</span>
+            <span style="font-size: 0.78rem; font-weight: 600; color: var(--notion-text-muted);" id="xmlProgressCount">0 / 0 procesados</span>
             <span style="font-size: 1.2rem; font-weight: 700; font-family: var(--font-mono); color: var(--primary);" id="xmlProgressPercent">0%</span>
           </div>
           <div style="height: 8px; width: 100%; background: var(--notion-border-strong); border-radius: 9999px; overflow: hidden;">
@@ -1274,12 +1357,15 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
 
-        <div style="display: flex; justify-content: center; gap: 20px; margin-bottom: 20px; font-size: 0.84rem;">
+        <div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 18px; margin-bottom: 20px; font-size: 0.82rem;">
           <span style="display: inline-flex; align-items: center; gap: 5px; color: var(--tag-green-text); font-weight: 600;">
             <span style="font-size: 1rem;">✓</span> <span id="xmlProgressSuccess">0</span> obtenidos
           </span>
+          <span style="display: inline-flex; align-items: center; gap: 5px; color: var(--tag-yellow-text); font-weight: 600;">
+            <span id="xmlProgressPending">0</span> pendientes
+          </span>
           <span style="display: inline-flex; align-items: center; gap: 5px; color: var(--tag-red-text); font-weight: 600;">
-            <span style="font-size: 1rem;">✕</span> <span id="xmlProgressError">0</span> fallidos
+            <span style="font-size: 1rem;">✕</span> <span id="xmlProgressError">0</span> fallidos definitivos
           </span>
         </div>
 
@@ -1311,15 +1397,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const progressPercent = document.getElementById('xmlProgressPercent');
         const progressCount = document.getElementById('xmlProgressCount');
         const progressSuccess = document.getElementById('xmlProgressSuccess');
+        const progressPending = document.getElementById('xmlProgressPending');
         const progressError = document.getElementById('xmlProgressError');
         const progressMsg = document.getElementById('xmlProgressMsg');
 
         const percent = Math.min(100, Math.max(0, Math.round(status.porcentaje || 0)));
         if (progressBar) progressBar.style.width = `${percent}%`;
         if (progressPercent) progressPercent.textContent = `${percent}%`;
-        if (progressCount) progressCount.textContent = `${status.procesados || 0} / ${status.total_items || 0} obtenidos`;
+        if (progressCount) progressCount.textContent = `${status.procesados || 0} / ${status.total_items || 0} procesados`;
         if (progressSuccess) progressSuccess.textContent = status.exitosos || 0;
-        if (progressError) progressError.textContent = status.errores || 0;
+        if (progressPending) progressPending.textContent = status.pendientes_reintento || 0;
+        if (progressError) progressError.textContent = status.fallidos_definitivos || 0;
         if (progressMsg && status.mensaje) progressMsg.textContent = status.mensaje;
       },
       close() {
@@ -1329,7 +1417,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
-  async function startProposalXmlDownload(book) {
+  async function startProposalDownload(book, type, continueOnSunatOutage = false) {
     const isRce = book === 'RCE';
     const allItems = isRce ? currentProposalItemsRce : currentProposalItemsRvie;
     const proposalContext = isRce ? currentProposalContextRce : currentProposalContextRvie;
@@ -1345,7 +1433,7 @@ document.addEventListener('DOMContentLoaded', () => {
         proposalContext.companyId !== activeCompany.id ||
         proposalContext.ruc !== activeCompany.ruc ||
         proposalContext.period !== selectedPeriod) {
-      notifyWarning('Propuesta Desactualizada', 'La empresa o el período cambió. Vuelve a obtener la propuesta SIRE antes de descargar los XML.');
+      notifyWarning('Propuesta Desactualizada', 'La empresa o el período cambió. Vuelve a obtener la propuesta SIRE antes de continuar.');
       return;
     }
 
@@ -1386,12 +1474,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (!comprobantes.length) {
-      notifyWarning('Comprobantes no válidos', 'No se encontraron comprobantes con serie y número válidos para descargar.');
+      notifyWarning('Comprobantes no válidos', 'No se encontraron comprobantes con serie y número válidos para consultar.');
       return;
     }
 
     let progressModalRef = null;
-    const progressModal = showXmlProgressModal(async () => {
+    const progressModal = showProposalProgressModal(type, async () => {
       try {
         await apiFetch('/api/download/cancel', { method: 'POST' });
         setTimeout(async () => {
@@ -1412,35 +1500,44 @@ document.addEventListener('DOMContentLoaded', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           comprobantes,
-          tipos: ['XML'],
-          concurrency: 6,
+          tipos: [type],
+          concurrency: type === 'DESC' ? 8 : 6,
           proposal_ticket: proposalContext.ticket,
           proposal_book: proposalContext.book,
           proposal_period: proposalContext.period,
           owner_ruc: proposalContext.ruc,
-          document_timeout_seconds: 20
+          document_timeout_seconds: 20,
+          continue_on_sunat_outage: continueOnSunatOutage
         })
       });
 
       const data = await response.json();
+      if (response.status === 503 && data?.code === 'SUNAT_UNAVAILABLE' && !continueOnSunatOutage) {
+        progressModal.close();
+        const proceed = await confirmSunatUnavailable();
+        if (proceed) {
+          return startProposalDownload(book, type, true);
+        }
+        return;
+      }
       if (!response.ok || !data.success) {
         throw new Error(data.error || 'No se pudo iniciar el motor de descarga');
       }
 
       progressModalRef = progressModal;
-      await trackDownloadProgress(progressModal, isRce, items);
+      await trackDownloadProgress(progressModal, isRce, items, type);
     } catch (err) {
       progressModal.close();
-      notifyError('Error al Iniciar Descarga XML', err.message);
+      notifyError(`Error al obtener ${proposalDownloadLabel(type)}`, err.message);
     }
   }
 
-  function trackDownloadProgress(progressModal, isRce, items) {
+  function trackDownloadProgress(progressModal, isRce, items, type) {
     return new Promise((resolve) => {
       let finished = false;
       let sse = null;
       let pollInterval = null;
-      const statusMap = isRce ? xmlDownloadStatusMapRce : xmlDownloadStatusMapRvie;
+      const statusMap = proposalStatusMap(isRce, type);
 
       const recordResults = (resultados) => {
         if (!resultados || !resultados.length) return;
@@ -1449,15 +1546,32 @@ document.addEventListener('DOMContentLoaded', () => {
           const key = getCompKey(res.comprobante);
           const val = {
             exito: res.exito,
-            error: res.error || (res.exito ? '' : 'No se pudo obtener el XML de SUNAT'),
+            error: res.error || (res.exito ? '' : `No se pudo obtener ${proposalDownloadLabel(type)} de SUNAT`),
             nom_archivo: res.nom_archivo,
-            ruta_local: res.ruta_local
+            ruta_local: res.ruta_local,
+            descripcion: res.descripcion,
+            placa: res.placa,
+            estado_cdr: res.estado_cdr,
+            codigo_cdr: res.codigo_cdr,
+            mensaje_cdr: res.mensaje_cdr
           };
           statusMap.set(key, val);
           const tipo = String(res.comprobante.tipo || '').padStart(2, '0').trim();
           const serie = String(res.comprobante.serie || '').toUpperCase().trim();
           const numero = normalizeNumero(res.comprobante.numero);
-          statusMap.set(`${tipo}-${serie}-${numero}`, val);
+          const fallbackKey = `${tipo}-${serie}-${numero}`;
+          statusMap.set(fallbackKey, val);
+          if (type === 'DESC' && res.xml_ruta) {
+            const xmlValue = {
+              exito: true,
+              error: '',
+              nom_archivo: res.xml_nombre || 'XML',
+              ruta_local: res.xml_ruta
+            };
+            const xmlMap = proposalStatusMap(isRce, 'XML');
+            xmlMap.set(key, xmlValue);
+            xmlMap.set(fallbackKey, xmlValue);
+          }
         }
       };
 
@@ -1472,7 +1586,7 @@ document.addEventListener('DOMContentLoaded', () => {
           recordResults(finalStatus.resultados);
         }
 
-        // Refrescar la tabla para mostrar aspas y líneas con error
+        // Refrescar la tabla para mostrar checks, errores y descripciones.
         renderProposalTableGrid(isRce, items);
 
 	        const exitosos = finalStatus?.exitosos ?? 0;
@@ -1499,12 +1613,12 @@ document.addEventListener('DOMContentLoaded', () => {
           );
 	        } else if (errores > 0) {
 	          notifyWarning(
-	            closedByBudget ? 'Descarga XML Parcial por Tiempo' : (exitosos > 0 ? 'Descarga XML Parcial' : 'No se pudo descargar XML'),
-	            `Se procesó el lote oficial de SUNAT.\n\n${detalleResumen}\n\nTotal: ${exitosos + errores}${closedByBudget ? '\n\nSUNAT no respondió dentro del presupuesto del lote. Puedes repetir la descarga; los XML existentes no se volverán a solicitar.' : ''}`
+            closedByBudget ? 'Consulta parcial por tiempo' : (exitosos > 0 ? 'Proceso parcial' : `No se pudo obtener ${proposalDownloadLabel(type)}`),
+            `Se procesó el lote oficial de SUNAT.\n\n${detalleResumen}\n\nTotal: ${exitosos + errores}${closedByBudget ? '\n\nSUNAT no respondió dentro del presupuesto del lote. Puedes repetir la operación; los archivos existentes se reutilizarán.' : ''}`
 	          );
 	        } else {
 	          notifySuccess(
-            'Descarga XML Finalizada',
+            `${type === 'DESC' ? 'Consulta' : 'Descarga'} de ${proposalDownloadLabel(type)} finalizada`,
 	            `Se procesó el lote oficial de SUNAT.\n\n${detalleResumen}\n\nTotal: ${exitosos + errores}`
           );
         }
@@ -1624,7 +1738,7 @@ document.addEventListener('DOMContentLoaded', () => {
     legacyDownloadCdr.disabled = !canDownload;
   }
 
-  async function startDownload(tipo) {
+  async function startDownload(tipo, continueOnSunatOutage = false) {
     if (!loadedComprobantes.length) {
       notifyWarning('Sin Comprobantes', 'Carga un Excel o genera una propuesta SIRE antes de descargar.');
       return;
@@ -1648,10 +1762,21 @@ document.addEventListener('DOMContentLoaded', () => {
         body: JSON.stringify({
           comprobantes,
           tipos: [tipo],
-          concurrency
+          concurrency,
+          document_timeout_seconds: 20,
+          continue_on_sunat_outage: continueOnSunatOutage
         })
       });
       const data = await response.json();
+      if (response.status === 503 && data?.code === 'SUNAT_UNAVAILABLE' && !continueOnSunatOutage) {
+        finishProgress();
+        progressSection.style.display = 'none';
+        const proceed = await confirmSunatUnavailable();
+        if (proceed) {
+          return startDownload(tipo, true);
+        }
+        return;
+      }
       if (!response.ok || !data.success) throw new Error(data.error || 'No se pudo iniciar');
       isDownloading = true;
       startLiveProgress();
@@ -1674,6 +1799,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('statTotal').textContent = total;
     $('statProcessed').textContent = '0';
     $('statSuccess').textContent = '0';
+    if ($('statPending')) $('statPending').textContent = '0';
     $('statError').textContent = '0';
     $('resultsTbody').innerHTML = '';
     $('terminalLogs').innerHTML = '';
@@ -1733,7 +1859,8 @@ document.addEventListener('DOMContentLoaded', () => {
     $('statTotal').textContent = status.total_items || 0;
     $('statProcessed').textContent = status.procesados || 0;
     $('statSuccess').textContent = status.exitosos || 0;
-    $('statError').textContent = status.errores || 0;
+    if ($('statPending')) $('statPending').textContent = status.pendientes_reintento || 0;
+    $('statError').textContent = status.fallidos_definitivos || 0;
     if ($('statSpeed')) $('statSpeed').textContent = `${(status.velocidad_items_seg || 0).toFixed(1)} docs/s`;
     if ($('statEta')) $('statEta').textContent = status.tiempo_restante || '--';
     if (status.resultados) renderResults(status.resultados);
@@ -1818,8 +1945,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const button = event.target.closest('[data-view-path]');
     if (!button) return;
     const type = String(button.dataset.viewType || '').toUpperCase();
-    if (type === 'XML') {
-      openXMLViewer(button.dataset.viewPath);
+    if (type === 'XML' || type === 'CDR') {
+      openXMLViewer(button.dataset.viewPath, type);
       return;
     }
     resetFileViewer();
@@ -1847,12 +1974,15 @@ document.addEventListener('DOMContentLoaded', () => {
     $('fileViewerTabs').hidden = true;
     $('fileViewerSummaryTab').classList.add('active');
     $('fileViewerRawTab').classList.remove('active');
+    $('fileViewerSummaryTab').textContent = 'Comprobante';
   }
 
-  async function openXMLViewer(encodedPath) {
+  async function openXMLViewer(encodedPath, type = 'XML') {
     resetFileViewer();
     currentViewerPath = encodedPath;
-    $('fileViewerTitle').textContent = 'Comprobante electrónico';
+    const isCDR = type === 'CDR';
+    $('fileViewerTitle').textContent = isCDR ? 'Visor CDR' : 'Comprobante electrónico';
+    $('fileViewerSummaryTab').textContent = isCDR ? 'Constancia' : 'Comprobante';
     $('fileViewerTabs').hidden = false;
     $('fileViewerLoading').hidden = false;
     $('fileViewer').showModal();
@@ -1864,8 +1994,15 @@ document.addEventListener('DOMContentLoaded', () => {
         throw new Error(data.error || 'No se pudo interpretar el XML');
       }
       if (currentViewerPath !== encodedPath || !$('fileViewer').open) return;
-      $('fileViewerTitle').textContent = `${data.preview.document_type || 'Comprobante electrónico'} · ${data.preview.number || ''}`;
-      $('invoiceViewer').innerHTML = renderInvoicePreview(data.preview);
+      const preview = data.preview || {};
+      $('fileViewerTitle').textContent = preview.kind === 'cdr'
+        ? `Visor CDR · ${preview.reference || preview.number || ''}`
+        : `${preview.document_type || 'Comprobante electrónico'} · ${preview.number || ''}`;
+      currentViewerRawXML = formatXMLSource(data.raw_xml || '');
+      $('xmlSourceViewer').textContent = currentViewerRawXML;
+      $('invoiceViewer').innerHTML = preview.kind === 'cdr'
+        ? renderCDRPreview(preview)
+        : (preview.kind === 'withholding' ? renderWithholdingPreview(preview) : renderInvoicePreview(preview));
       $('invoiceViewer').hidden = false;
     } catch (error) {
       if (currentViewerPath !== encodedPath || !$('fileViewer').open) return;
@@ -1878,6 +2015,70 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       if (currentViewerPath === encodedPath) $('fileViewerLoading').hidden = true;
     }
+  }
+
+  function renderCDRPreview(cdr) {
+    const sender = cdr.supplier || {};
+    const receiver = cdr.customer || {};
+    const status = String(cdr.response_status || 'SIN ESTADO').toUpperCase();
+    const statusClass = status.startsWith('ACEPTADO')
+      ? 'accepted'
+      : (status === 'RECHAZADO' ? 'rejected' : (status === 'OBSERVADO' ? 'observed' : 'processed'));
+    const notes = (cdr.notes || []).filter(Boolean);
+
+    return `
+      <article class="commercial-invoice cdr-preview">
+        <header class="invoice-header">
+          <div class="invoice-company">
+            <span class="invoice-eyebrow">CONSTANCIA DE RECEPCIÓN</span>
+            <h2>SUNAT</h2>
+            <p>Resultado oficial del procesamiento del comprobante electrónico</p>
+          </div>
+          <div class="invoice-document-box">
+            <span>DOCUMENTO RELACIONADO</span>
+            <strong>${escapeHtml(cdr.reference || '—')}</strong>
+            <small>Tipo ${escapeHtml(cdr.document_type_code || '—')}</small>
+          </div>
+        </header>
+
+        <section class="cdr-status ${statusClass}">
+          <div>
+            <span>Estado SUNAT</span>
+            <strong>${escapeHtml(status)}</strong>
+          </div>
+          <div>
+            <span>Código de respuesta</span>
+            <strong>${escapeHtml(cdr.response_code || '—')}</strong>
+          </div>
+          <p>${escapeHtml(cdr.response_message || cdr.reason || 'SUNAT no incluyó un mensaje descriptivo.')}</p>
+        </section>
+
+        <section class="invoice-meta-grid">
+          ${invoiceMeta('Fecha de recepción', formatInvoiceDate(cdr.issue_date) || '—')}
+          ${invoiceMeta('Hora de recepción', cdr.issue_time || '—')}
+          ${invoiceMeta('Identificador CDR', cdr.number || '—')}
+          ${invoiceMeta('Tipo de comprobante', cdr.document_type_code || '—')}
+        </section>
+
+        <section class="cdr-parties">
+          ${cdrParty('Remitente de la respuesta', sender)}
+          ${cdrParty('Destinatario', receiver)}
+        </section>
+
+        <section class="cdr-notes">
+          <span class="invoice-eyebrow">INFORMACIÓN ADICIONAL</span>
+          ${notes.length ? notes.map((note) => `<p>${escapeHtml(note)}</p>`).join('') : '<p>El CDR no contiene observaciones adicionales.</p>'}
+        </section>
+      </article>`;
+  }
+
+  function cdrParty(label, party) {
+    return `<div class="invoice-party-card">
+      <span class="invoice-eyebrow">${escapeHtml(label.toUpperCase())}</span>
+      <strong>${escapeHtml(party.name || 'No informado')}</strong>
+      <span>RUC ${escapeHtml(party.ruc || '—')}</span>
+      ${party.address ? `<small>${escapeHtml(party.address)}</small>` : ''}
+    </div>`;
   }
 
   async function showXMLViewerTab(tab) {
@@ -1905,11 +2106,23 @@ document.addEventListener('DOMContentLoaded', () => {
     const supplier = invoice.supplier || {};
     const customer = invoice.customer || {};
     const totals = invoice.totals || {};
+    const financial = invoice.financial || null;
     const lines = invoice.lines || [];
+    const taxes = invoice.taxes || [];
+    const warnings = invoice.warnings || [];
     const currency = invoice.currency || 'PEN';
     const notes = (invoice.notes || []).filter(Boolean);
+    const referenceDetails = [
+      invoice.reference_type ? `Tipo ${escapeHtml(invoice.reference_type)}` : '',
+      invoice.reference_date ? formatInvoiceDate(invoice.reference_date) : '',
+      invoice.reason_code ? `Motivo ${escapeHtml(invoice.reason_code)}` : '',
+      invoice.reason ? escapeHtml(invoice.reason) : ''
+    ].filter(Boolean).join(' · ');
     const reference = invoice.reference
-      ? `<div class="invoice-reference"><strong>Documento relacionado:</strong> ${escapeHtml(invoice.reference)}${invoice.reason ? ` · ${escapeHtml(invoice.reason)}` : ''}</div>`
+      ? `<div class="invoice-reference"><strong>Documento relacionado:</strong> ${escapeHtml(invoice.reference)}${referenceDetails ? ` · ${referenceDetails}` : ''}</div>`
+      : '';
+    const reconciliation = financial && financial.reconciles
+      ? `<div class="invoice-reference"><strong>Conciliación:</strong> ${formatInvoiceAmount(financial.gross_settlement, currency)} − ${formatInvoiceAmount(financial.registry_total, currency)} = ${formatInvoiceAmount(financial.net_settlement, currency)}</div>`
       : '';
 
     return `
@@ -1932,7 +2145,7 @@ document.addEventListener('DOMContentLoaded', () => {
           ${invoiceMeta('Fecha de emisión', formatInvoiceDate(invoice.issue_date))}
           ${invoiceMeta('Fecha de vencimiento', formatInvoiceDate(invoice.due_date) || '—')}
           ${invoiceMeta('Moneda', currencyLabel(currency))}
-          ${invoiceMeta('Tipo de operación', invoice.operation_type || '—')}
+          ${invoiceMeta(invoice.family === 'note' ? 'Efecto del documento' : 'Tipo de operación', invoice.family === 'note' ? (invoice.document_type_code === '07' ? 'Disminuye el documento relacionado' : 'Aumenta el documento relacionado') : (invoice.operation_type || '—'))}
         </section>
 
         <section class="invoice-party-card">
@@ -1943,19 +2156,24 @@ document.addEventListener('DOMContentLoaded', () => {
         </section>
 
         ${reference}
+        ${reconciliation}
+        ${renderPaymentSummary(invoice.payment, currency)}
+        ${warnings.length ? `<section class="cdr-notes"><span class="invoice-eyebrow">ADVERTENCIAS DEL XML</span>${warnings.map((warning) => `<p>${escapeHtml(warning)}</p>`).join('')}</section>` : ''}
 
         <section class="invoice-lines-wrap">
           <table class="invoice-lines">
-            <thead><tr><th>#</th><th>Descripción</th><th>Cantidad</th><th>Precio unit.</th><th>IGV</th><th>Importe</th></tr></thead>
+            <thead>${financial
+              ? '<tr><th>#</th><th>Concepto</th><th>Valor inicial</th><th>Cargos / ajustes</th><th>IGV</th><th>Total componente</th></tr>'
+              : '<tr><th>#</th><th>Descripción</th><th>Cantidad</th><th>Precio unit.</th><th>IGV</th><th>Importe</th></tr>'}</thead>
             <tbody>
               ${lines.length ? lines.map((line, index) => `
                 <tr>
                   <td>${escapeHtml(line.number || String(index + 1))}</td>
-                  <td><strong>${escapeHtml(line.description || 'Sin descripción')}</strong>${line.code ? `<small>Código: ${escapeHtml(line.code)}</small>` : ''}</td>
-                  <td class="invoice-number">${escapeHtml(line.quantity || '—')} ${escapeHtml(line.unit_code || '')}</td>
-                  <td class="invoice-number">${formatInvoiceAmount(line.unit_price, currency)}</td>
+                  <td><strong>${escapeHtml(line.description || 'Sin descripción')}</strong>${line.code ? `<small>Código: ${escapeHtml(line.code)}</small>` : ''}${renderItemProperties(line.properties)}</td>
+                  <td class="invoice-number">${financial ? formatInvoiceAmount(line.amount, currency) : `${escapeHtml(line.quantity || '—')} ${escapeHtml(line.unit_code || '')}`}</td>
+                  <td class="invoice-number">${formatInvoiceAmount(financial ? line.adjustment_amount : line.unit_price, currency)}</td>
                   <td class="invoice-number">${formatInvoiceAmount(line.tax_amount, currency)}</td>
-                  <td class="invoice-number"><strong>${formatInvoiceAmount(line.amount, currency)}</strong></td>
+                  <td class="invoice-number"><strong>${formatInvoiceAmount(financial ? line.unit_price : line.amount, currency)}</strong></td>
                 </tr>`).join('') : '<tr><td colspan="6" class="invoice-empty">El XML no contiene líneas de detalle.</td></tr>'}
             </tbody>
           </table>
@@ -1967,15 +2185,115 @@ document.addEventListener('DOMContentLoaded', () => {
             ${notes.length ? notes.map((note) => `<p>${escapeHtml(note)}</p>`).join('') : '<p>Sin observaciones.</p>'}
           </div>
           <dl class="invoice-totals">
-            ${invoiceTotal('Valor de venta', totals.tax_exclusive || totals.line_extension, currency)}
-            ${invoiceTotal('IGV / tributos', totals.tax, currency)}
-            ${invoiceTotal('Descuentos', totals.allowance, currency, true)}
-            ${invoiceTotal('Otros cargos', totals.charge, currency, true)}
-            ${invoiceTotal('Anticipos', totals.prepaid, currency, true)}
-            <div class="invoice-total-payable"><dt>Importe total</dt><dd>${formatInvoiceAmount(totals.payable || totals.tax_inclusive, currency)}</dd></div>
+            ${financial ? `
+              ${invoiceTotal('Base registrable', financial.registry_base, currency)}
+              ${invoiceTotal('IGV', financial.tax, currency)}
+              ${invoiceTotal('Comisiones, cargos e impuestos', financial.registry_total, currency)}
+              ${invoiceTotal('Liquidación bruta', financial.gross_settlement, currency)}
+              <div class="invoice-total-payable"><dt>Neto liquidado</dt><dd>${formatInvoiceAmount(financial.net_settlement, currency)}</dd></div>
+            ` : `
+              ${invoiceTotal('Valor de venta', totals.tax_exclusive || totals.line_extension, currency)}
+              ${renderTaxTotals(taxes, totals.tax, currency)}
+              ${invoiceTotal('Precio de venta con impuestos', totals.tax_inclusive, currency, true)}
+              ${invoiceTotal('Descuentos', totals.allowance, currency, true)}
+              ${invoiceTotal('Otros cargos', totals.charge, currency, true)}
+              ${invoiceTotal('Anticipos', totals.prepaid, currency, true)}
+              ${invoiceTotal('Redondeo', totals.rounding, currency, true)}
+              <div class="invoice-total-payable"><dt>Importe total</dt><dd>${formatInvoiceAmount(totals.payable || totals.tax_inclusive, currency)}</dd></div>
+            `}
           </dl>
         </footer>
       </article>`;
+  }
+
+  function renderTaxTotals(taxes, fallbackTax, currency) {
+    if (!taxes || !taxes.length) return invoiceTotal('IGV / tributos', fallbackTax, currency);
+    return taxes.map((tax) => {
+      const taxAmount = Number(tax.tax_amount || 0);
+      const taxableAmount = Number(tax.taxable_amount || 0);
+      if (Math.abs(taxAmount) < 0.000001 && Math.abs(taxableAmount) < 0.000001) return '';
+      const base = Math.abs(taxableAmount) > 0.000001
+        ? invoiceTotal(`${tax.name} · base`, tax.taxable_amount, currency)
+        : '';
+      const amount = Math.abs(taxAmount) > 0.000001
+        ? invoiceTotal(tax.name, tax.tax_amount, currency)
+        : '';
+      return `${base}${amount}`;
+    }).join('');
+  }
+
+  function renderItemProperties(properties) {
+    return (properties || []).map((property) => {
+      const label = property.name || property.code || 'Dato adicional';
+      return `<small>${escapeHtml(label)}: ${escapeHtml(property.value || '—')}</small>`;
+    }).join('');
+  }
+
+  function renderPaymentSummary(payment, currency) {
+    if (!payment) return '';
+    const installments = payment.installments || [];
+    return `<section class="invoice-reference">
+      <strong>Condición de pago:</strong> ${escapeHtml(payment.mode || 'No indicada')}
+      ${payment.outstanding_amount ? ` · Saldo: ${formatInvoiceAmount(payment.outstanding_amount, currency)}` : ''}
+      ${installments.map((installment) => ` · ${escapeHtml(installment.number || 'Cuota')}: ${formatInvoiceAmount(installment.amount, currency)}${installment.due_date ? ` (${formatInvoiceDate(installment.due_date)})` : ''}`).join('')}
+      ${payment.detraction_code ? `<br><strong>Detracción:</strong> código ${escapeHtml(payment.detraction_code)}${payment.detraction_percent ? ` · ${escapeHtml(payment.detraction_percent)}%` : ''}${payment.detraction_amount ? ` · ${formatInvoiceAmount(payment.detraction_amount, currency)}` : ''}${payment.detraction_account ? ` · Cuenta ${escapeHtml(payment.detraction_account)}` : ''}` : ''}
+    </section>`;
+  }
+
+  function renderWithholdingPreview(document) {
+    const agent = document.supplier || {};
+    const receiver = document.customer || {};
+    const related = document.related_documents || [];
+    const currency = document.currency || 'PEN';
+    const adjustmentLabel = document.document_type_code === '20' ? 'Retención' : 'Percepción';
+    const netLabel = document.document_type_code === '20' ? 'Neto pagado' : 'Neto cobrado';
+    return `<article class="commercial-invoice">
+      <header class="invoice-header">
+        <div class="invoice-company">
+          <span class="invoice-eyebrow">AGENTE</span>
+          <h2>${escapeHtml(agent.name || 'Agente no informado')}</h2>
+          <p>RUC ${escapeHtml(agent.ruc || '—')}</p>
+        </div>
+        <div class="invoice-document-box">
+          <span>${escapeHtml((document.document_type || '').toUpperCase())}</span>
+          <strong>${escapeHtml(document.number || '—')}</strong>
+          <small>Código SUNAT ${escapeHtml(document.document_type_code || '—')}</small>
+        </div>
+      </header>
+      <section class="invoice-meta-grid">
+        ${invoiceMeta('Fecha de emisión', formatInvoiceDate(document.issue_date))}
+        ${invoiceMeta('Moneda', currencyLabel(currency))}
+        ${invoiceMeta('Documentos relacionados', String(related.length))}
+        ${invoiceMeta('Tipo', adjustmentLabel)}
+      </section>
+      <section class="invoice-party-card">
+        <span class="invoice-eyebrow">RECEPTOR</span>
+        <strong>${escapeHtml(receiver.name || 'No informado')}</strong>
+        <span>RUC ${escapeHtml(receiver.ruc || '—')}</span>
+      </section>
+      <section class="invoice-lines-wrap">
+        <table class="invoice-lines">
+          <thead><tr><th>Documento</th><th>Tipo</th><th>Emisión</th><th>Importe</th><th>Pago</th><th>Tasa</th><th>${adjustmentLabel}</th><th>${netLabel}</th></tr></thead>
+          <tbody>${related.length ? related.map((item) => `<tr>
+            <td><strong>${escapeHtml(item.number || '—')}</strong>${item.payment_id ? `<small>Pago: ${escapeHtml(item.payment_id)}</small>` : ''}</td>
+            <td>${escapeHtml(item.document_type_code || '—')}</td>
+            <td>${escapeHtml(formatInvoiceDate(item.issue_date) || '—')}</td>
+            <td class="invoice-number">${formatInvoiceAmount(item.invoice_amount, item.currency || currency)}</td>
+            <td class="invoice-number">${formatInvoiceAmount(item.paid_amount, item.currency || currency)}</td>
+            <td class="invoice-number">${escapeHtml(item.rate || '—')}%</td>
+            <td class="invoice-number">${formatInvoiceAmount(item.adjustment_amount, item.currency || currency)}</td>
+            <td class="invoice-number"><strong>${formatInvoiceAmount(item.net_amount, item.currency || currency)}</strong></td>
+          </tr>`).join('') : '<tr><td colspan="8" class="invoice-empty">El XML no contiene documentos relacionados.</td></tr>'}</tbody>
+        </table>
+      </section>
+      <footer class="invoice-footer">
+        <div class="invoice-notes"><span class="invoice-eyebrow">RESUMEN</span><p>Importes declarados por el agente.</p></div>
+        <dl class="invoice-totals">
+          ${invoiceTotal(document.document_type_code === '20' ? 'Total pagado' : 'Total cobrado', document.totals?.line_extension, currency)}
+          <div class="invoice-total-payable"><dt>Total ${adjustmentLabel.toLowerCase()}</dt><dd>${formatInvoiceAmount(document.totals?.tax, currency)}</dd></div>
+        </dl>
+      </footer>
+    </article>`;
   }
 
   function invoiceMeta(label, value) {

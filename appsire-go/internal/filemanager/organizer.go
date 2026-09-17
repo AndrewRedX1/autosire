@@ -114,7 +114,19 @@ func (m *FileManager) SaveDownloadedFile(comp sunat.Comprobante, file *sunat.Dow
 	}
 
 	fileName := file.FileName
-	if fileName == "" {
+	if tipoDescarga == sunat.DescargaCDR {
+		if fileName == "" {
+			fileName = fmt.Sprintf("R-%s-%s-%s-%s.zip", comp.RUC, comp.Tipo, comp.Serie, comp.Numero)
+		} else {
+			clean := filepath.Base(strings.TrimSpace(fileName))
+			lower := strings.ToLower(clean)
+			if !strings.HasPrefix(lower, "r-") && !strings.HasSuffix(lower, "-cdr.zip") && !strings.HasSuffix(lower, "-cdr.xml") {
+				fileName = "R-" + clean
+			} else {
+				fileName = clean
+			}
+		}
+	} else if fileName == "" {
 		ext := ".bin"
 		switch tipoDescarga {
 		case sunat.DescargaPDF:
@@ -124,8 +136,6 @@ func (m *FileManager) SaveDownloadedFile(comp sunat.Comprobante, file *sunat.Dow
 			if file.IsZip {
 				ext = ".zip"
 			}
-		case sunat.DescargaCDR:
-			ext = ".zip"
 		}
 		fileName = fmt.Sprintf("%s-%s-%s-%s%s", comp.RUC, comp.Tipo, comp.Serie, comp.Numero, ext)
 	}
@@ -217,6 +227,31 @@ func (m *FileManager) SaveBatchManifest(status sunat.BatchStatus) (string, error
 		return "", fmt.Errorf("guardando manifiesto: %w", err)
 	}
 	m.manifestProgress[batchID] = status.Procesados
+	return path, nil
+}
+
+// SaveBatchTrafficLog guarda únicamente metadatos técnicos de cada intento.
+// El motor no incluye credenciales, tokens ni cuerpos de respuesta en estas líneas.
+func (m *FileManager) SaveBatchTrafficLog(batchID string, lines []string) (string, error) {
+	m.manifestMu.Lock()
+	defer m.manifestMu.Unlock()
+
+	batchID = sanitizeFolderName(filepath.Base(batchID))
+	if batchID == "" || batchID == "." {
+		return "", fmt.Errorf("identificador de lote inválido")
+	}
+	directory := filepath.Join(m.BaseDir, "APP DESCARGAS", "LOTES")
+	if err := os.MkdirAll(directory, 0755); err != nil {
+		return "", fmt.Errorf("creando carpeta de trazas: %w", err)
+	}
+	path := filepath.Join(directory, batchID+".traffic.log")
+	content := []byte(strings.Join(lines, "\r\n"))
+	if len(content) > 0 {
+		content = append(content, '\r', '\n')
+	}
+	if err := writeFileAtomic(path, content, 0644); err != nil {
+		return "", fmt.Errorf("guardando traza técnica: %w", err)
+	}
 	return path, nil
 }
 

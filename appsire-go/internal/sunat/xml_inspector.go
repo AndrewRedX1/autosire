@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -150,7 +151,15 @@ func ValidateContentIntegrity(data []byte, expected TipoDescarga) error {
 			return errors.New("el archivo no contiene estructura válida de XML ni ZIP")
 		}
 	case DescargaCDR:
-		if !IsZipContent(data) && !IsXMLContent(data) {
+		if IsZipContent(data) {
+			_, innerXML, err := ExtractFileFromZip(data, ".xml")
+			if err != nil {
+				return fmt.Errorf("el ZIP del CDR no se puede abrir: %w", err)
+			}
+			if !IsXMLContent(innerXML) {
+				return errors.New("el ZIP del CDR no contiene un XML válido")
+			}
+		} else if !IsXMLContent(data) {
 			return errors.New("el CDR no contiene estructura válida de ZIP o XML")
 		}
 	}

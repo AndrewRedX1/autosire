@@ -1,8 +1,12 @@
 package engine
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -13,20 +17,21 @@ import (
 )
 
 type recordingClient struct {
-	mu                 sync.Mutex
-	calls              []sunat.TipoDescarga
-	probeErr           error
-	fallbackProbeErr   error
-	fallbackProbes     int
-	refreshes          int
-	primaryXML         int
-	primaryXMLFailures int
-	blockXML           bool
-	fallbackXML        int
-	pdfDownloads       int
-	cdrDownloads       int
-	transportResets    int
-	idleCloses         int
+	mu                   sync.Mutex
+	calls                []sunat.TipoDescarga
+	probeErr             error
+	fallbackProbeErr     error
+	fallbackProbes       int
+	refreshes            int
+	primaryXML           int
+	primaryXMLFailures   int
+	blockXML             bool
+	fallbackXML          int
+	pdfDownloads         int
+	cdrDownloads         int
+	descriptionDownloads int
+	transportResets      int
+	idleCloses           int
 }
 
 func (c *recordingClient) DownloadPDF(
@@ -94,6 +99,17 @@ func (c *recordingClient) DownloadCDR(
 		FileName: "R-documento.xml",
 		Content:  []byte("<?xml version=\"1.0\"?><ApplicationResponse/>"),
 	}, nil
+}
+
+func (c *recordingClient) DownloadDescription(
+	context.Context,
+	sunat.Comprobante,
+) (sunat.DescriptionResult, error) {
+	c.record(sunat.DescargaDescripcion)
+	c.mu.Lock()
+	c.descriptionDownloads++
+	c.mu.Unlock()
+	return sunat.DescriptionResult{Description: "Servicio de prueba"}, nil
 }
 
 func (c *recordingClient) ProbeConsultacpe(context.Context, sunat.Comprobante) error {
@@ -450,6 +466,134 @@ func TestExpectedItemCountOmitsPortalCDR(t *testing.T) {
 	}
 }
 
+func TestDescriptionUsesLocalXMLBeforeConsultingSUNAT(t *testing.T) {
+	t.Parallel()
+
+	client := &recordingClient{}
+	manager := filemanager.NewFileManager(t.TempDir())
+	downloadEngine := NewDownloadEngine(client, manager)
+	comp := sunat.Comprobante{
+		RUC:          "20111111111",
+		Tipo:         "01",
+		Serie:        "F001",
+		Numero:       "10",
+		Libro:        "2",
+		Periodo:      "202609",
+		EmpresaRUC:   "20999999999",
+		EmpresaRazon: "Empresa de prueba",
+	}
+	xmlData := []byte(`<?xml version="1.0"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+ xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+ xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+ <cac:InvoiceLine><cac:Item><cbc:Description>Detalle desde XML</cbc:Description></cac:Item></cac:InvoiceLine>
+</Invoice>`)
+	_, err := manager.SaveDownloadedFile(comp, &sunat.DownloadedFile{
+		FileName: "20111111111-01-F001-10.xml",
+		Content:  xmlData,
+	}, sunat.DescargaXML)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	attempt := downloadEngine.downloadSingleItem(t.Context(), comp, sunat.DescargaDescripcion, true)
+	if attempt.err != nil {
+		t.Fatal(attempt.err)
+	}
+	if attempt.item.Descripcion != "Detalle desde XML" || attempt.item.Origen != "extraído del XML local" {
+		t.Fatalf("resultado = %#v", attempt.item)
+	}
+	client.mu.Lock()
+	downloads := client.descriptionDownloads
+	client.mu.Unlock()
+	if downloads != 0 {
+		t.Fatalf("consultas de descripción = %d, want 0", downloads)
+	}
+}
+
+func TestDescriptionUsesLegacyLocalZIPBeforeConsultingSUNAT(t *testing.T) {
+	t.Parallel()
+
+	client := &recordingClient{}
+	manager := filemanager.NewFileManager(t.TempDir())
+	comp := sunat.Comprobante{
+		RUC: "20111111111", Tipo: "01", Serie: "F001", Numero: "11", Libro: "2", Periodo: "202609",
+		EmpresaRUC: "20999999999", EmpresaRazon: "Empresa de prueba",
+	}
+	xmlData := []byte(`<?xml version="1.0"?><Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"><cac:InvoiceLine><cac:Item><cbc:Description>Detalle desde ZIP</cbc:Description></cac:Item></cac:InvoiceLine></Invoice>`)
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	entry, err := writer.Create("20111111111-01-F001-11.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := entry.Write(xmlData); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	savedPath, err := manager.SaveDownloadedFile(comp, &sunat.DownloadedFile{
+		FileName: "20111111111-01-F001-11.xml",
+		Content:  xmlData,
+	}, sunat.DescargaXML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(savedPath); err != nil {
+		t.Fatal(err)
+	}
+	zipPath := strings.TrimSuffix(savedPath, filepath.Ext(savedPath)) + ".zip"
+	if err := os.WriteFile(zipPath, archive.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	downloadEngine := NewDownloadEngine(client, filemanager.NewFileManager(manager.BaseDir))
+
+	attempt := downloadEngine.downloadSingleItem(t.Context(), comp, sunat.DescargaDescripcion, true)
+	if attempt.err != nil {
+		t.Fatal(attempt.err)
+	}
+	if attempt.item.Descripcion != "Detalle desde ZIP" {
+		t.Fatalf("descripción = %q", attempt.item.Descripcion)
+	}
+	client.mu.Lock()
+	downloads := client.descriptionDownloads
+	client.mu.Unlock()
+	if downloads != 0 {
+		t.Fatalf("consultas de descripción = %d, want 0", downloads)
+	}
+}
+
+func TestDescriptionDownloadsMissingXMLBeforeDirectAPI(t *testing.T) {
+	t.Parallel()
+
+	client := &recordingClient{}
+	manager := filemanager.NewFileManager(t.TempDir())
+	downloadEngine := NewDownloadEngine(client, manager)
+	comp := sunat.Comprobante{
+		RUC: "20111111111", Tipo: "01", Serie: "F001", Numero: "12", Libro: "2", Periodo: "202609",
+		EmpresaRUC: "20999999999", EmpresaRazon: "Empresa de prueba",
+	}
+
+	attempt := downloadEngine.downloadSingleItem(t.Context(), comp, sunat.DescargaDescripcion, true)
+	if attempt.err != nil {
+		t.Fatal(attempt.err)
+	}
+	if attempt.item.Origen != "extraído del XML descargado" || attempt.item.XMLRuta == "" {
+		t.Fatalf("resultado = %#v", attempt.item)
+	}
+	if _, err := os.Stat(attempt.item.XMLRuta); err != nil {
+		t.Fatalf("XML no guardado: %v", err)
+	}
+	client.mu.Lock()
+	xmlDownloads := client.primaryXML
+	directDownloads := client.descriptionDownloads
+	client.mu.Unlock()
+	if xmlDownloads != 1 || directDownloads != 0 {
+		t.Fatalf("descargas XML/directas = %d/%d, want 1/0", xmlDownloads, directDownloads)
+	}
+}
+
 func TestClassifyResultNormalizesFinalSummaryCategories(t *testing.T) {
 	t.Parallel()
 
@@ -509,6 +653,42 @@ func TestXMLBatchTimeoutScalesWithBatchSize(t *testing.T) {
 	}
 	if got := xmlBatchTimeout(120, 431, 6); got != 2*time.Minute {
 		t.Fatalf("xmlBatchTimeout explícito = %s, want 2m", got)
+	}
+}
+
+func TestRunBatchProcessesCDROnly(t *testing.T) {
+	t.Parallel()
+
+	client := &recordingClient{}
+	manager := filemanager.NewFileManager(t.TempDir())
+	downloadEngine := NewDownloadEngine(client, manager)
+	comps := []sunat.Comprobante{
+		{RUC: "20111111111", Tipo: "01", Serie: "F001", Numero: "1", Libro: "2"},
+		{RUC: "20111111111", Tipo: "01", Serie: "E001", Numero: "2", Libro: "2"}, // Portal (debe omitirse de CDR)
+		{RUC: "20222222222", Tipo: "01", Serie: "F001", Numero: "3", Libro: "2"},
+	}
+	job := testBatch(2) // 2 elegibles
+
+	downloadEngine.runBatch(t.Context(), job, DownloadRequest{
+		Comprobantes: comps,
+		Tipos: []sunat.TipoDescarga{
+			sunat.DescargaCDR,
+		},
+		Concurrency: 6,
+	}, 6)
+
+	client.mu.Lock()
+	cdrDownloads := client.cdrDownloads
+	client.mu.Unlock()
+
+	if cdrDownloads != 2 {
+		t.Fatalf("cdrDownloads = %d, want 2 (excluyendo serie E)", cdrDownloads)
+	}
+
+	job.Mu.RLock()
+	defer job.Mu.RUnlock()
+	if job.Status.Exitosos != 2 {
+		t.Fatalf("exitosos = %d, want 2", job.Status.Exitosos)
 	}
 }
 

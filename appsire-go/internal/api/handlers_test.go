@@ -1,6 +1,7 @@
 package api
 
 import (
+	"archive/zip"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -82,6 +83,43 @@ func TestHandleXMLPreviewRejectsOutsidePath(t *testing.T) {
 
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", response.Code)
+	}
+}
+
+func TestHandleXMLPreviewReadsCDRFromZIP(t *testing.T) {
+	t.Parallel()
+	baseDir := t.TempDir()
+	zipPath := filepath.Join(baseDir, "R-20600000001-01-F001-123.zip")
+	archiveFile, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := zip.NewWriter(archiveFile)
+	xmlFile, err := archive.Create("R-20600000001-01-F001-123.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = xmlFile.Write([]byte(`<ApplicationResponse><ID>R-20600000001-01-F001-123</ID><DocumentResponse><Response><ResponseCode>0</ResponseCode><Description>Aceptado</Description></Response><DocumentReference><ID>F001-123</ID><DocumentTypeCode>01</DocumentTypeCode></DocumentReference></DocumentResponse></ApplicationResponse>`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := archiveFile.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	server := &Server{fileManager: filemanager.NewFileManager(baseDir)}
+	req := httptest.NewRequest(http.MethodGet, "/api/files/xml-preview?path="+url.QueryEscape(zipPath), nil)
+	response := httptest.NewRecorder()
+	server.HandleXMLPreview(response, req)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"kind":"cdr"`) || !strings.Contains(response.Body.String(), `"raw_xml"`) {
+		t.Fatalf("respuesta CDR inesperada: %s", response.Body.String())
 	}
 }
 

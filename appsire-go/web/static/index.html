@@ -111,7 +111,7 @@
       </nav>
 
       <div class="sidebar-foot">
-        <span>v1.0 · Local Seguro</span>
+        <span id="appBuildInfo">Versión local</span>
         <button type="button" id="themeToggleBtn" class="btn-link" style="font-size:0.75rem; text-decoration:none;" title="Cambiar tema">🌓 Tema</button>
       </div>
     </aside>
@@ -334,17 +334,17 @@
                     <span class="btn-icon">📥</span>
                     <span>Descarga XML</span>
                   </button>
-                  <button type="button" class="btn btn-sm btn-secondary" id="btnDescargaPdfRce" title="Descarga de representaciones impresas PDF">
-                    <span class="btn-icon">📄</span>
-                    <span>Descarga PDF</span>
-                  </button>
                   <button type="button" class="btn btn-sm btn-secondary" id="btnDescargaCdrRce" title="Descarga de Constancias de Recepción CDR">
                     <span class="btn-icon">📋</span>
                     <span>Descarga CDR</span>
                   </button>
+                  <button type="button" class="btn btn-sm btn-secondary" id="btnDescargaPdfRce" title="Descarga de representaciones impresas PDF">
+                    <span class="btn-icon">📄</span>
+                    <span>Descarga PDF</span>
+                  </button>
                   <button type="button" class="btn btn-sm btn-secondary" id="btnDescargaDescRce" title="Descarga de Detalle y Descripción">
                     <span class="btn-icon">📝</span>
-                    <span>Descarga Descripcion</span>
+                    <span>Descarga Descripción</span>
                   </button>
                 </div>
               </div>
@@ -353,12 +353,17 @@
                   <thead>
                     <tr>
                       <th style="width: 45px; text-align: center;">N°</th>
+                      <th class="col-artifact">XML</th>
+                      <th class="col-artifact">CDR</th>
+                      <th class="col-artifact">PDF</th>
                       <th>Comp. Pago</th>
-                      <th style="width: 50px; text-align: center;" class="col-xml">XML</th>
+                      <th class="col-description">Descripción</th>
                       <th>Tipo Doc. Ident.</th>
                       <th>RUC</th>
                       <th>Razon Social</th>
                       <th>Fecha</th>
+                      <th>Moneda</th>
+                      <th class="text-right">T.C.</th>
                       <th>Tipo Doc. Ref</th>
                       <th>Serie Doc. Ref.</th>
                       <th>Nro doc. Ref.</th>
@@ -438,17 +443,17 @@
                     <span class="btn-icon">📥</span>
                     <span>Descarga XML</span>
                   </button>
-                  <button type="button" class="btn btn-sm btn-secondary" id="btnDescargaPdfRvie" title="Descarga de representaciones impresas PDF">
-                    <span class="btn-icon">📄</span>
-                    <span>Descarga PDF</span>
-                  </button>
                   <button type="button" class="btn btn-sm btn-secondary" id="btnDescargaCdrRvie" title="Descarga de Constancias de Recepción CDR">
                     <span class="btn-icon">📋</span>
                     <span>Descarga CDR</span>
                   </button>
+                  <button type="button" class="btn btn-sm btn-secondary" id="btnDescargaPdfRvie" title="Descarga de representaciones impresas PDF">
+                    <span class="btn-icon">📄</span>
+                    <span>Descarga PDF</span>
+                  </button>
                   <button type="button" class="btn btn-sm btn-secondary" id="btnDescargaDescRvie" title="Descarga de Detalle y Descripción">
                     <span class="btn-icon">📝</span>
-                    <span>Descarga Descripcion</span>
+                    <span>Descarga Descripción</span>
                   </button>
                 </div>
               </div>
@@ -457,12 +462,17 @@
                   <thead>
                     <tr>
                       <th style="width: 45px; text-align: center;">N°</th>
+                      <th class="col-artifact">XML</th>
+                      <th class="col-artifact">CDR</th>
+                      <th class="col-artifact">PDF</th>
                       <th>Comp. Pago</th>
-                      <th style="width: 50px; text-align: center;" class="col-xml">XML</th>
+                      <th class="col-description">Descripción</th>
                       <th>Tipo Doc. Ident.</th>
                       <th>RUC</th>
                       <th>Razon Social</th>
                       <th>Fecha</th>
+                      <th>Moneda</th>
+                      <th class="text-right">T.C.</th>
                       <th>Tipo Doc. Ref</th>
                       <th>Serie Doc. Ref.</th>
                       <th>Nro doc. Ref.</th>
@@ -613,8 +623,12 @@
               <span class="stat-label">Exitosos</span>
               <span class="stat-value" id="statSuccess">0</span>
             </div>
+            <div class="stat-card">
+              <span class="stat-label">Pendientes</span>
+              <span class="stat-value" id="statPending">0</span>
+            </div>
             <div class="stat-card stat-error">
-              <span class="stat-label">Errores</span>
+              <span class="stat-label">Fallidos Definitivos</span>
               <span class="stat-value" id="statError">0</span>
             </div>
             <div class="stat-card stat-speed">

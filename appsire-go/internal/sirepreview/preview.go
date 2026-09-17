@@ -48,6 +48,7 @@ type ProposalItem struct {
 	OtrosTributos      string `json:"otros_tributos"`
 	ValorAdquisiciones string `json:"valor_adquisiciones"`
 	Moneda             string `json:"moneda"`
+	TipoCambio         string `json:"tipo_cambio"`
 	Tipo               string `json:"tipo"`
 	Serie              string `json:"serie"`
 	Numero             string `json:"numero"`
@@ -365,6 +366,7 @@ func buildProposalItem(row []string, book sunat.ProposalBook) ProposalItem {
 			OtrosTributos:      "0.00",
 			ValorAdquisiciones: formatMoney(field(row, 35)),
 			Moneda:             field(row, 25),
+			TipoCambio:         field(row, 26),
 		}
 	} else {
 		// RVIE (Ventas)
@@ -404,6 +406,7 @@ func buildProposalItem(row []string, book sunat.ProposalBook) ProposalItem {
 			OtrosTributos:      formatMoney(field(row, 22)),
 			ValorAdquisiciones: formatMoney(field(row, 13)),
 			Moneda:             field(row, 26),
+			TipoCambio:         field(row, 27),
 		}
 	}
 }

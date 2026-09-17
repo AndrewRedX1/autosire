@@ -36,9 +36,15 @@ type Server struct {
 	proposalClient *sunat.ProposalClient
 	companyStore   *company.Store
 	sessionMgr     *session.Manager
+	buildInfo      BuildInfo
 	identityMu     sync.Mutex
 	proposalMu     sync.RWMutex
 	proposals      map[sunat.ProposalBook]proposalBinding
+}
+
+type BuildInfo struct {
+	Version string `json:"version"`
+	BuiltAt string `json:"built_at"`
 }
 
 type proposalBinding struct {
@@ -57,6 +63,7 @@ func NewServer(
 	pc *sunat.ProposalClient,
 	cs *company.Store,
 	sm *session.Manager,
+	buildInfo BuildInfo,
 ) *Server {
 	return &Server{
 		tokenService:   ts,
@@ -67,8 +74,18 @@ func NewServer(
 		proposalClient: pc,
 		companyStore:   cs,
 		sessionMgr:     sm,
+		buildInfo:      buildInfo,
 		proposals:      make(map[sunat.ProposalBook]proposalBinding),
 	}
+}
+
+// HandleAppInfo permite identificar el binario que está atendiendo al frontend.
+func (s *Server) HandleAppInfo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		respondError(w, http.StatusMethodNotAllowed, "Método no permitido")
+		return
+	}
+	respondJSON(w, http.StatusOK, s.buildInfo)
 }
 
 func (s *Server) RequireSession(next http.HandlerFunc) http.HandlerFunc {
@@ -445,6 +462,24 @@ func (s *Server) HandleStartDownload(w http.ResponseWriter, r *http.Request) {
 				req.Comprobantes[i].Numero)
 		}
 	}
+	if s.downloadEngine.IsRunning() {
+		respondError(w, http.StatusBadRequest, "ya existe un proceso de descarga en ejecución")
+		return
+	}
+	if !req.ContinueOnOutage && len(req.Comprobantes) > 0 {
+		probeCtx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		availability := s.downloadEngine.CheckSunatAvailability(probeCtx, req.Comprobantes[0])
+		cancel()
+		if !availability.Available {
+			respondJSON(w, http.StatusServiceUnavailable, map[string]interface{}{
+				"success": false,
+				"code":    "SUNAT_UNAVAILABLE",
+				"error":   "SUNAT no está respondiendo en este momento",
+				"detail":  availability.Detail,
+			})
+			return
+		}
+	}
 
 	batchID, err := s.downloadEngine.StartBatch(req)
 	if err != nil {
@@ -470,7 +505,7 @@ func (s *Server) validateProposalBinding(req engine.DownloadRequest, currentRUC 
 	if !found || binding.Ticket != strings.TrimSpace(req.ProposalTicket) ||
 		binding.Period != strings.TrimSpace(req.ProposalPeriod) ||
 		binding.RUC != strings.TrimSpace(currentRUC) || binding.RUC != strings.TrimSpace(req.OwnerRUC) {
-		return fmt.Errorf("la propuesta ya no coincide con la empresa o período activos; vuelva a obtenerla antes de descargar XML")
+		return fmt.Errorf("la propuesta ya no coincide con la empresa o período activos; vuelva a obtenerla antes de continuar")
 	}
 	return nil
 }
@@ -644,8 +679,8 @@ func (s *Server) HandleViewFile(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, requestedPath)
 }
 
-// HandleXMLPreview transforma un XML UBL local en un modelo de factura para
-// el visor. Nunca admite rutas fuera de la carpeta de descargas activa.
+// HandleXMLPreview transforma un XML UBL o el XML interno de un CDR ZIP en un
+// modelo seguro para el visor. Nunca admite rutas fuera de descargas.
 func (s *Server) HandleXMLPreview(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		respondError(w, http.StatusMethodNotAllowed, "Método no permitido")
@@ -656,17 +691,18 @@ func (s *Server) HandleXMLPreview(w http.ResponseWriter, r *http.Request) {
 		respondError(w, status, message)
 		return
 	}
-	if !strings.EqualFold(filepath.Ext(requestedPath), ".xml") {
-		respondError(w, http.StatusBadRequest, "El archivo seleccionado no es XML")
-		return
-	}
-	file, err := os.Open(requestedPath)
+	const previewLimit = int64(20 << 20)
+	xmlData, err := readPreviewXML(requestedPath, previewLimit)
 	if err != nil {
-		respondError(w, http.StatusNotFound, "No se pudo abrir el XML")
+		respondError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	defer file.Close()
-	preview, err := xmlpreview.ParseReader(file, 20<<20)
+	preview, err := xmlpreview.Parse(xmlData)
+	if err != nil {
+		respondError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	rawXML, err := xmlpreview.NormalizeSource(xmlData)
 	if err != nil {
 		respondError(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -674,7 +710,53 @@ func (s *Server) HandleXMLPreview(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"preview": preview,
+		"raw_xml": rawXML,
 	})
+}
+
+func readPreviewXML(path string, limit int64) ([]byte, error) {
+	extension := strings.ToLower(filepath.Ext(path))
+	if extension == ".xml" {
+		file, err := os.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("no se pudo abrir el XML")
+		}
+		defer file.Close()
+		return readLimitedXML(file, limit)
+	}
+	if extension != ".zip" {
+		return nil, fmt.Errorf("el archivo seleccionado no es XML ni contiene un CDR ZIP")
+	}
+
+	archive, err := zip.OpenReader(path)
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo abrir el ZIP del CDR: %w", err)
+	}
+	defer archive.Close()
+	for _, file := range archive.File {
+		if file.FileInfo().IsDir() || !strings.EqualFold(filepath.Ext(file.Name), ".xml") {
+			continue
+		}
+		stream, err := file.Open()
+		if err != nil {
+			return nil, fmt.Errorf("no se pudo abrir el XML interno del CDR: %w", err)
+		}
+		data, readErr := readLimitedXML(stream, limit)
+		stream.Close()
+		return data, readErr
+	}
+	return nil, fmt.Errorf("el ZIP del CDR no contiene un archivo XML")
+}
+
+func readLimitedXML(reader io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, fmt.Errorf("no se pudo leer el XML: %w", err)
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("el XML supera el límite de %d bytes", limit)
+	}
+	return data, nil
 }
 
 func (s *Server) resolveDownloadedFile(rawPath string) (string, int, string) {

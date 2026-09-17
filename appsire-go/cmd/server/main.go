@@ -26,6 +26,11 @@ import (
 	"appsire-go/internal/sunat"
 )
 
+var (
+	appVersion = "dev"
+	buildTime  = "sin fecha de compilación"
+)
+
 func main() {
 	port := flag.Int("port", 8085, "Puerto de escucha del servidor web")
 	downloadDir := flag.String("downloads", "./downloads", "Directorio base donde se guardarán los archivos descargados")
@@ -77,12 +82,14 @@ func main() {
 		proposalClient,
 		companyStore,
 		sessionMgr,
+		api.BuildInfo{Version: appVersion, BuiltAt: buildTime},
 	)
 
 	mux := http.NewServeMux()
 
 	// Rutas de Licencia AutoSire
 	mux.HandleFunc("/api/session", server.HandleSession)
+	mux.HandleFunc("/api/app/info", server.HandleAppInfo)
 	mux.HandleFunc("/api/session/login", server.HandleSessionLogin)
 	mux.HandleFunc("/api/session/logout", server.RequireSession(server.HandleSessionLogout))
 	mux.HandleFunc("/api/license/status", server.HandleLicenseStatus)

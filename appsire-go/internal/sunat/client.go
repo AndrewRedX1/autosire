@@ -24,6 +24,9 @@ const (
 	// SunatCpeBaseURL base para endpoints de CPE
 	SunatCpeBaseURL = "https://api-cpe.sunat.gob.pe/v1/contribuyente"
 
+	// DefaultBrowserUserAgent emula el User-Agent del navegador para evitar que el gateway WAF de SUNAT cierre la conexión con EOF
+	DefaultBrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
 	MaxRetriesDefault = 5
 	BaseDelayMs       = 500
 	MaxDelayMs        = 12000
@@ -202,6 +205,7 @@ func (c *SunatClient) doRequestWithRetries(ctx context.Context, method, urlStr s
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("Accept", "*/*")
 		req.Header.Set("Cache-Control", "no-cache")
+		req.Header.Set("User-Agent", DefaultBrowserUserAgent)
 
 		resp, err := c.currentHTTPClient().Do(req)
 		if err != nil {
@@ -290,6 +294,7 @@ func (c *SunatClient) doRequestOnce(ctx context.Context, method, urlStr string) 
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Cache-Control", "no-cache")
+	req.Header.Set("User-Agent", DefaultBrowserUserAgent)
 
 	resp, err := c.currentHTTPClient().Do(req)
 	if err != nil {
@@ -395,6 +400,9 @@ func parseRetryAfter(value string, now time.Time) time.Duration {
 // IsTransientDownloadError indica si conviene incluir una fila en los barridos.
 func IsTransientDownloadError(err error) bool {
 	if err == nil {
+		return false
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "sin cdr en sunat") {
 		return false
 	}
 	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {

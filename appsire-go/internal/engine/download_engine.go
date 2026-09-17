@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,10 +17,11 @@ import (
 )
 
 const (
-	initialWorkers = 6
-	retryWorkers   = 2
-	maxSweeps      = 3
-	sweepCooldown  = 2500 * time.Millisecond
+	initialWorkers     = 6
+	descriptionWorkers = 6
+	retryWorkers       = 2
+	maxSweeps          = 3
+	sweepCooldown      = 2500 * time.Millisecond
 
 	defaultXMLDocumentTimeout = 20 * time.Second
 	defaultXMLBatchTimeout    = 90 * time.Second
@@ -39,6 +41,7 @@ type downloadClient interface {
 	DownloadXMLFallback(context.Context, sunat.Comprobante) (*sunat.DownloadedFile, error)
 	ProbeXMLFallback(context.Context, sunat.Comprobante) error
 	DownloadCDR(context.Context, sunat.Comprobante) (*sunat.DownloadedFile, error)
+	DownloadDescription(context.Context, sunat.Comprobante) (sunat.DescriptionResult, error)
 	ProbeConsultacpe(context.Context, sunat.Comprobante) error
 	RefreshToken(context.Context) error
 }
@@ -51,7 +54,7 @@ type connectionController interface {
 // DownloadRequest opciones para lanzar un lote de descargas
 type DownloadRequest struct {
 	Comprobantes        []sunat.Comprobante  `json:"comprobantes"`
-	Tipos               []sunat.TipoDescarga `json:"tipos"` // PDF, XML, CDR
+	Tipos               []sunat.TipoDescarga `json:"tipos"` // PDF, XML, CDR, DESC
 	Concurrency         int                  `json:"concurrency"`
 	ProposalTicket      string               `json:"proposal_ticket,omitempty"`
 	ProposalBook        string               `json:"proposal_book,omitempty"`
@@ -59,6 +62,7 @@ type DownloadRequest struct {
 	OwnerRUC            string               `json:"owner_ruc,omitempty"`
 	BatchTimeoutSecs    int                  `json:"batch_timeout_seconds,omitempty"`
 	DocumentTimeoutSecs int                  `json:"document_timeout_seconds,omitempty"`
+	ContinueOnOutage    bool                 `json:"continue_on_sunat_outage,omitempty"`
 }
 
 // DownloadEngine coordina los workers y la ejecución de lotes de descarga masiva
@@ -79,6 +83,8 @@ type ActiveBatch struct {
 	CancelFunc      context.CancelFunc
 	Mu              sync.RWMutex
 	Logs            []string
+	Traffic         []string
+	PendingRetries  map[string]struct{}
 	DocumentTimeout time.Duration
 }
 
@@ -140,7 +146,7 @@ func (e *DownloadEngine) StartBatch(req DownloadRequest) (string, error) {
 		return "", fmt.Errorf("no se enviaron comprobantes para descargar")
 	}
 	if len(req.Tipos) == 0 {
-		return "", fmt.Errorf("debe seleccionar al menos un tipo de archivo (PDF, XML o CDR)")
+		return "", fmt.Errorf("debe seleccionar al menos un tipo de descarga (PDF, XML, CDR o descripción)")
 	}
 
 	for i := range req.Comprobantes {
@@ -164,6 +170,9 @@ func (e *DownloadEngine) StartBatch(req DownloadRequest) (string, error) {
 	if xmlOnly(req.Tipos) {
 		batchTimeout := xmlBatchTimeout(req.BatchTimeoutSecs, len(req.Comprobantes), concurrency)
 		ctx, cancel = context.WithTimeout(ctx, batchTimeout)
+	} else if containsOnlineFormats(req.Tipos) {
+		batchTimeout := boundedBatchTimeout(req.BatchTimeoutSecs, totalWorkItems, concurrency)
+		ctx, cancel = context.WithTimeout(ctx, batchTimeout)
 	} else {
 		ctx, cancel = context.WithCancel(ctx)
 	}
@@ -185,6 +194,8 @@ func (e *DownloadEngine) StartBatch(req DownloadRequest) (string, error) {
 		},
 		CancelFunc:      cancel,
 		Logs:            make([]string, 0, 100),
+		Traffic:         make([]string, 0, totalWorkItems),
+		PendingRetries:  make(map[string]struct{}),
 		DocumentTimeout: documentTimeout,
 	}
 
@@ -206,6 +217,25 @@ func xmlBatchTimeout(requestedSeconds, items, workers int) time.Duration {
 	// convertir una degradación de SUNAT en una ejecución de varias horas.
 	estimated := time.Duration(waves) * 5 * time.Second
 	return min(max(estimated, defaultXMLBatchTimeout), 10*time.Minute)
+}
+
+func boundedBatchTimeout(requestedSeconds, totalWorkItems, workers int) time.Duration {
+	if requestedSeconds > 0 {
+		return boundedDuration(requestedSeconds, defaultXMLBatchTimeout, 30*time.Second, 15*time.Minute)
+	}
+	workers = max(1, workers)
+	waves := (max(1, totalWorkItems) + workers - 1) / workers
+	estimated := time.Duration(waves) * 5 * time.Second
+	return min(max(estimated, defaultXMLBatchTimeout), 15*time.Minute)
+}
+
+func containsOnlineFormats(types []sunat.TipoDescarga) bool {
+	for _, t := range types {
+		if t == sunat.DescargaXML || t == sunat.DescargaCDR || t == sunat.DescargaPDF || t == sunat.DescargaDescripcion {
+			return true
+		}
+	}
+	return false
 }
 
 func xmlOnly(types []sunat.TipoDescarga) bool {
@@ -280,7 +310,7 @@ func (e *DownloadEngine) DownloadItem(
 	if comp.RUC == "" || comp.Tipo == "" || comp.Serie == "" || comp.Numero == "" {
 		return sunat.ItemResult{}, errors.New("el comprobante no tiene RUC, tipo, serie y número completos")
 	}
-	if tipo != sunat.DescargaPDF && tipo != sunat.DescargaXML && tipo != sunat.DescargaCDR {
+	if tipo != sunat.DescargaPDF && tipo != sunat.DescargaXML && tipo != sunat.DescargaCDR && tipo != sunat.DescargaDescripcion {
 		return sunat.ItemResult{}, fmt.Errorf("tipo de descarga desconocido: %s", tipo)
 	}
 	if len(eligibleForStage([]sunat.Comprobante{comp}, tipo)) == 0 {
@@ -318,6 +348,68 @@ type attemptResult struct {
 	err  error
 }
 
+// ServiceAvailability resume el sondeo autenticado previo a un lote.
+type ServiceAvailability struct {
+	Available bool
+	Detail    string
+}
+
+// CheckSunatAvailability reproduce la advertencia preventiva de la macro. Los
+// 401 renuevan el token una vez y nunca se clasifican como caída del servicio.
+func (e *DownloadEngine) CheckSunatAvailability(
+	ctx context.Context,
+	comp sunat.Comprobante,
+) ServiceAvailability {
+	comp = prepareComprobante(comp)
+	comp.Tipo = sunat.NormalizeTipo(comp.Tipo)
+	refreshed := false
+	consecutiveFailures := 0
+
+	for consecutiveFailures < 3 {
+		probeCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+		err := e.client.ProbeConsultacpe(probeCtx, comp)
+		cancel()
+		if err == nil {
+			return ServiceAvailability{Available: true}
+		}
+
+		if status, ok := sunat.HTTPStatus(err); ok {
+			switch status {
+			case http.StatusUnauthorized:
+				if !refreshed {
+					refreshed = true
+					if refreshErr := e.client.RefreshToken(ctx); refreshErr == nil {
+						continue
+					}
+				}
+				return ServiceAvailability{Available: true, Detail: "SUNAT rechazó la autenticación"}
+			case http.StatusForbidden:
+				return ServiceAvailability{Available: true, Detail: "SUNAT rechazó el permiso consultacpe"}
+			case http.StatusInternalServerError, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+				return ServiceAvailability{
+					Available: false,
+					Detail:    fmt.Sprintf("SUNAT respondió HTTP %d", status),
+				}
+			}
+		}
+
+		if !sunat.IsTransientDownloadError(err) {
+			return ServiceAvailability{Available: true}
+		}
+		consecutiveFailures++
+		if consecutiveFailures < 3 {
+			if waitErr := waitForStage(ctx, 250*time.Millisecond); waitErr != nil {
+				break
+			}
+		}
+	}
+
+	return ServiceAvailability{
+		Available: false,
+		Detail:    "SUNAT acumuló tres fallos consecutivos de conexión",
+	}
+}
+
 // runBatch replica la estrategia de la macro: formatos aislados, token por
 // cohorte, menor concurrencia en recuperaciones y PDF local desde el XML.
 func (e *DownloadEngine) runBatch(
@@ -332,7 +424,7 @@ func (e *DownloadEngine) runBatch(
 		defer controller.CloseIdleConnections()
 	}
 	workers := min(concurrency, initialWorkers)
-	e.addLog(job, fmt.Sprintf("Motor por etapas iniciado con %d hilos", workers))
+	e.addLog(job, fmt.Sprintf("Motor por etapas iniciado con hasta %d hilos", concurrency))
 
 	selected := selectedTypes(req.Tipos)
 	consultacpeAllowed := true
@@ -359,7 +451,12 @@ func (e *DownloadEngine) runBatch(
 		}
 	}
 	cancelPreflight()
-	stages := []sunat.TipoDescarga{sunat.DescargaXML, sunat.DescargaPDF, sunat.DescargaCDR}
+	stages := []sunat.TipoDescarga{
+		sunat.DescargaXML,
+		sunat.DescargaPDF,
+		sunat.DescargaCDR,
+		sunat.DescargaDescripcion,
+	}
 	if selected[sunat.DescargaCDR] {
 		eligibleCDR := eligibleForStage(req.Comprobantes, sunat.DescargaCDR)
 		omitted := len(req.Comprobantes) - len(eligibleCDR)
@@ -383,7 +480,16 @@ func (e *DownloadEngine) runBatch(
 		}
 
 		comps := eligibleForStage(req.Comprobantes, stage)
-		e.updateStageMessage(job, fmt.Sprintf("Etapa %s: preparando %d comprobantes", stage, len(comps)))
+		stageWorkers := workers
+		if stage == sunat.DescargaDescripcion {
+			stageWorkers = min(concurrency, descriptionWorkers)
+		}
+		e.updateStageMessage(job, fmt.Sprintf(
+			"Etapa %s: consultando %d de %d",
+			stage,
+			min(stageWorkers, len(comps)),
+			len(comps),
+		))
 		e.addLog(job, fmt.Sprintf("Etapa %s iniciada: %d comprobantes", stage, len(comps)))
 
 		results := e.runStage(
@@ -391,7 +497,7 @@ func (e *DownloadEngine) runBatch(
 			job,
 			comps,
 			stage,
-			workers,
+			stageWorkers,
 			consultacpeAllowed,
 		)
 		for _, result := range results {
@@ -415,7 +521,7 @@ func (e *DownloadEngine) preflightConsultacpe(
 	}
 
 	if status, ok := sunat.HTTPStatus(err); !ok || (status != 401 && status != 403) {
-		e.addLog(job, fmt.Sprintf("Preflight consultacpe no concluyente: %v", err))
+		e.addLog(job, fmt.Sprintf("Preflight consultacpe no concluyente: %s", safeResultError(err)))
 		return true
 	}
 
@@ -425,14 +531,14 @@ func (e *DownloadEngine) preflightConsultacpe(
 		return false
 	}
 	if refreshErr := e.client.RefreshToken(ctx); refreshErr != nil {
-		e.addLog(job, fmt.Sprintf("No se pudo renovar el token del lote: %v", refreshErr))
+		e.addLog(job, fmt.Sprintf("No se pudo renovar el token del lote: %s", safeResultError(refreshErr)))
 		return false
 	}
 	if retryErr := e.client.ProbeConsultacpe(ctx, comps[0]); retryErr == nil {
 		e.addLog(job, "Preflight consultacpe autorizado despues de renovar")
 		return true
 	} else if status, ok := sunat.HTTPStatus(retryErr); !ok || (status != 401 && status != 403) {
-		e.addLog(job, fmt.Sprintf("Preflight consultacpe no concluyente despues de renovar: %v", retryErr))
+		e.addLog(job, fmt.Sprintf("Preflight consultacpe no concluyente despues de renovar: %s", safeResultError(retryErr)))
 		return true
 	}
 
@@ -454,7 +560,7 @@ func (e *DownloadEngine) preflightXMLFallback(
 	status, ok := sunat.HTTPStatus(err)
 	if !ok || (status != 401 && status != 403) {
 		// Un documento inexistente o mal formado no demuestra una falla global.
-		e.addLog(job, fmt.Sprintf("Preflight controlcpe no concluyente: %v", err))
+		e.addLog(job, fmt.Sprintf("Preflight controlcpe no concluyente: %s", safeResultError(err)))
 		return nil
 	}
 	if status == 401 {
@@ -469,7 +575,7 @@ func (e *DownloadEngine) preflightXMLFallback(
 			err = retryErr
 			status, ok = sunat.HTTPStatus(err)
 			if !ok || (status != 401 && status != 403) {
-				e.addLog(job, fmt.Sprintf("Preflight controlcpe no concluyente despues de renovar: %v", err))
+				e.addLog(job, fmt.Sprintf("Preflight controlcpe no concluyente despues de renovar: %s", safeResultError(err)))
 				return nil
 			}
 		}
@@ -485,7 +591,7 @@ func globalXMLAccessMessage(err error) string {
 	if status == 401 {
 		return "SUNAT rechazo el token XML (HTTP 401) incluso despues de renovarlo: revise el RUC y los permisos de la credencial API"
 	}
-	return fmt.Sprintf("no se pudo validar el acceso XML: %v", err)
+	return fmt.Sprintf("no se pudo validar el acceso XML: %s", safeResultError(err))
 }
 
 func (e *DownloadEngine) runStage(
@@ -655,27 +761,28 @@ func (e *DownloadEngine) processStage(
 				if ctx.Err() != nil {
 					result := failedAttempt(comp, tipo, ctx.Err())
 					result.item.Reintentos = retries
-					if tipo == sunat.DescargaXML {
-						e.recordStageProgress(job, result.item)
-					}
+					e.recordStageProgress(job, result.item, false)
+					e.logTrafficAttempt(job, tipo, comp, retries+1, 0, result)
 					results <- result
 					continue
 				}
 				itemCtx := ctx
 				cancel := func() {}
-				if tipo == sunat.DescargaXML {
+				if stageUsesDocumentTimeout(tipo) {
 					documentTimeout := job.DocumentTimeout
 					if documentTimeout <= 0 {
 						documentTimeout = defaultXMLDocumentTimeout
 					}
 					itemCtx, cancel = context.WithTimeout(ctx, documentTimeout)
 				}
+				started := time.Now()
 				result := e.downloadSingleItem(itemCtx, comp, tipo, consultacpeAllowed)
+				duration := time.Since(started)
 				cancel()
 				result.item.Reintentos = retries
-				if tipo == sunat.DescargaXML || result.err == nil {
-					e.recordStageProgress(job, result.item)
-				}
+				pending := result.err != nil && isRecoverableAttempt(result.err)
+				e.recordStageProgress(job, result.item, pending)
+				e.logTrafficAttempt(job, tipo, comp, retries+1, duration, result)
 				results <- result
 			}
 		}()
@@ -775,7 +882,7 @@ func (e *DownloadEngine) retryUnauthorizedCohort(
 
 	e.addLog(job, fmt.Sprintf("Etapa %s: renovando token para %d filas con 401", tipo, len(unauthorized)))
 	if err := e.client.RefreshToken(ctx); err != nil {
-		e.addLog(job, fmt.Sprintf("Etapa %s: renovacion fallida: %v", tipo, err))
+		e.addLog(job, fmt.Sprintf("Etapa %s: renovacion fallida: %s", tipo, safeResultError(err)))
 		return attempts
 	}
 
@@ -795,7 +902,11 @@ func (e *DownloadEngine) sweepTransientFailures(
 	tipo sunat.TipoDescarga,
 	consultacpeAllowed bool,
 ) []attemptResult {
-	for sweep := 1; sweep <= maxSweeps; sweep++ {
+	stageSweeps := maxSweeps
+	if tipo == sunat.DescargaDescripcion {
+		stageSweeps = 2
+	}
+	for sweep := 1; sweep <= stageSweeps; sweep++ {
 		pending := filterAttempts(attempts, func(attempt attemptResult) bool {
 			return sunat.IsTransientDownloadError(attempt.err)
 		})
@@ -803,7 +914,7 @@ func (e *DownloadEngine) sweepTransientFailures(
 			break
 		}
 
-		e.addLog(job, fmt.Sprintf("Etapa %s: barrido %d/%d para %d pendientes", tipo, sweep, maxSweeps, len(pending)))
+		e.addLog(job, fmt.Sprintf("Etapa %s: barrido %d/%d para %d pendientes", tipo, sweep, stageSweeps, len(pending)))
 		if err := waitForStage(ctx, sweepCooldown); err != nil {
 			break
 		}
@@ -915,36 +1026,43 @@ func (e *DownloadEngine) recordFinalResult(
 ) {
 	result.Categoria = classifyResult(result)
 	job.Mu.Lock()
+	replaced := false
 	for index, existing := range job.Status.Resultados {
 		if itemResultKey(existing) == itemResultKey(result) {
+			if existing.Exito != result.Exito {
+				if result.Exito {
+					job.Status.Exitosos++
+					job.Status.Errores--
+				} else {
+					job.Status.Exitosos--
+					job.Status.Errores++
+				}
+			}
 			job.Status.Resultados[index] = result
-			job.Mu.Unlock()
-			return
+			replaced = true
+			break
 		}
 	}
-	job.Status.Procesados++
-	if result.Exito {
-		job.Status.Exitosos++
-	} else {
-		job.Status.Errores++
+	if !replaced {
+		job.Status.Procesados++
+		if result.Exito {
+			job.Status.Exitosos++
+		} else {
+			job.Status.Errores++
+		}
+		job.Status.Resultados = append(job.Status.Resultados, result)
 	}
-	job.Status.Resultados = append(job.Status.Resultados, result)
-	job.Status.Porcentaje = float64(job.Status.Procesados) / float64(job.Status.TotalItems) * 100
-
-	elapsed := time.Since(startedAt).Seconds()
-	if elapsed > 0 {
-		job.Status.VelocidadItemsSeg = float64(job.Status.Procesados) / elapsed
-	}
-	job.Status.Mensaje = fmt.Sprintf(
-		"Procesados %d de %d: %d exitosos, %d fallidos",
-		job.Status.Procesados,
-		job.Status.TotalItems,
-		job.Status.Exitosos,
-		job.Status.Errores,
-	)
+	delete(job.PendingRetries, itemResultKey(result))
+	refreshFailureBreakdownLocked(job)
+	refreshProgressLocked(job, startedAt)
+	job.Status.Mensaje = progressMessage(job.Status)
 	snapshot := cloneBatchStatus(job.Status)
 	job.Mu.Unlock()
 	e.broadcastStatus(snapshot)
+
+	if replaced {
+		return
+	}
 
 	if result.Exito {
 		e.addLog(job, fmt.Sprintf("[OK] %s: %s (%s)", result.Tipo, result.NomArchivo, result.Origen))
@@ -971,7 +1089,11 @@ func (e *DownloadEngine) updateStageMessage(job *ActiveBatch, message string) {
 // recordStageProgress publica exitos y errores apenas termina cada comprobante.
 // Si una renovacion posterior recupera un 401, reemplaza el resultado y ajusta
 // los contadores sin duplicar el trabajo procesado.
-func (e *DownloadEngine) recordStageProgress(job *ActiveBatch, result sunat.ItemResult) {
+func (e *DownloadEngine) recordStageProgress(
+	job *ActiveBatch,
+	result sunat.ItemResult,
+	pendingRetry bool,
+) {
 	result.Categoria = classifyResult(result)
 	job.Mu.Lock()
 	replaced := false
@@ -1000,20 +1122,18 @@ func (e *DownloadEngine) recordStageProgress(job *ActiveBatch, result sunat.Item
 		}
 		job.Status.Resultados = append(job.Status.Resultados, result)
 	}
-	if job.Status.TotalItems > 0 {
-		job.Status.Porcentaje = float64(job.Status.Procesados) / float64(job.Status.TotalItems) * 100
+	key := itemResultKey(result)
+	if pendingRetry {
+		if job.PendingRetries == nil {
+			job.PendingRetries = make(map[string]struct{})
+		}
+		job.PendingRetries[key] = struct{}{}
+	} else {
+		delete(job.PendingRetries, key)
 	}
-	elapsed := time.Since(job.Status.IniciadoEn).Seconds()
-	if elapsed > 0 {
-		job.Status.VelocidadItemsSeg = float64(job.Status.Procesados) / elapsed
-	}
-	job.Status.Mensaje = fmt.Sprintf(
-		"Procesados %d de %d: %d exitosos, %d fallidos",
-		job.Status.Procesados,
-		job.Status.TotalItems,
-		job.Status.Exitosos,
-		job.Status.Errores,
-	)
+	refreshFailureBreakdownLocked(job)
+	refreshProgressLocked(job, job.Status.IniciadoEn)
+	job.Status.Mensaje = progressMessage(job.Status)
 	snapshot := cloneBatchStatus(job.Status)
 	job.Mu.Unlock()
 	e.broadcastStatus(snapshot)
@@ -1032,6 +1152,35 @@ func (e *DownloadEngine) recordStageProgress(job *ActiveBatch, result sunat.Item
 		result.Comprobante.Numero,
 		result.Error,
 	))
+}
+
+func refreshFailureBreakdownLocked(job *ActiveBatch) {
+	job.Status.PendientesReintento = len(job.PendingRetries)
+	job.Status.FallidosDefinitivos = max(0, job.Status.Errores-job.Status.PendientesReintento)
+}
+
+func refreshProgressLocked(job *ActiveBatch, startedAt time.Time) {
+	if job.Status.TotalItems > 0 {
+		job.Status.Porcentaje = float64(job.Status.Procesados) / float64(job.Status.TotalItems) * 100
+		if job.Status.PendientesReintento > 0 && job.Status.Porcentaje >= 100 {
+			job.Status.Porcentaje = 99
+		}
+	}
+	elapsed := time.Since(startedAt).Seconds()
+	if elapsed > 0 {
+		job.Status.VelocidadItemsSeg = float64(job.Status.Procesados) / elapsed
+	}
+}
+
+func progressMessage(status sunat.BatchStatus) string {
+	return fmt.Sprintf(
+		"Procesados %d de %d: %d obtenidos, %d pendientes, %d fallidos definitivos",
+		status.Procesados,
+		status.TotalItems,
+		status.Exitosos,
+		status.PendientesReintento,
+		status.FallidosDefinitivos,
+	)
 }
 
 func (e *DownloadEngine) saveManifestCheckpoint(job *ActiveBatch, snapshot sunat.BatchStatus) {
@@ -1061,11 +1210,13 @@ func classifyResult(result sunat.ItemResult) string {
 	case strings.Contains(errorText, `"coderror":"301"`),
 		strings.Contains(errorText, "no se encontro el xml"),
 		strings.Contains(errorText, "no se encontró el xml"),
+		strings.Contains(errorText, "sin cdr en sunat"),
 		strings.Contains(errorText, "http 404"):
 		return categoryUnavailable
 	case strings.Contains(errorText, `"coderror":"302"`),
 		strings.Contains(errorText, "consulta invalida"),
 		strings.Contains(errorText, "consulta inválida"),
+		strings.Contains(errorText, "http 422"),
 		strings.Contains(errorText, "http 400"),
 		strings.Contains(errorText, "http 403"):
 		return categoryUnsupported
@@ -1077,6 +1228,10 @@ func classifyResult(result sunat.ItemResult) string {
 func (e *DownloadEngine) finishBatch(ctx context.Context, job *ActiveBatch, startedAt time.Time) {
 	job.Mu.Lock()
 	now := time.Now()
+	for key := range job.PendingRetries {
+		delete(job.PendingRetries, key)
+	}
+	refreshFailureBreakdownLocked(job)
 	job.Status.FinalizadoEn = &now
 	job.Status.TiempoRestanteEstimado = "0s"
 	job.Status.HilosActivos = 0
@@ -1109,8 +1264,18 @@ func (e *DownloadEngine) finishBatch(ctx context.Context, job *ActiveBatch, star
 			job.Status.VelocidadItemsSeg,
 		)
 	}
+	traffic := append([]string{}, job.Traffic...)
 	finalStatus := cloneBatchStatus(job.Status)
 	job.Mu.Unlock()
+	trafficPath, trafficErr := e.fileManager.SaveBatchTrafficLog(finalStatus.BatchID, traffic)
+	if trafficErr != nil {
+		e.addLog(job, fmt.Sprintf("[ERROR] No se pudo guardar la traza del lote: %v", trafficErr))
+	} else {
+		job.Mu.Lock()
+		job.Status.TrafficLogPath = trafficPath
+		finalStatus = cloneBatchStatus(job.Status)
+		job.Mu.Unlock()
+	}
 	manifestPath, manifestErr := e.fileManager.SaveBatchManifest(finalStatus)
 	if manifestErr != nil {
 		e.addLog(job, fmt.Sprintf("[ERROR] No se pudo guardar el manifiesto del lote: %v", manifestErr))
@@ -1142,6 +1307,9 @@ func (e *DownloadEngine) downloadSingleItem(
 	tipo sunat.TipoDescarga,
 	consultacpeAllowed bool,
 ) attemptResult {
+	if tipo == sunat.DescargaDescripcion {
+		return e.downloadDescription(ctx, comp, consultacpeAllowed)
+	}
 	if existingPath, ok := e.fileManager.FindExistingFile(comp, tipo); ok {
 		info, err := os.Stat(existingPath)
 		if err == nil {
@@ -1229,16 +1397,153 @@ func (e *DownloadEngine) downloadSingleItem(
 	}}
 }
 
+func (e *DownloadEngine) downloadDescription(
+	ctx context.Context,
+	comp sunat.Comprobante,
+	consultacpeAllowed bool,
+) attemptResult {
+	var xmlErr error
+	if xmlPath, ok := e.fileManager.FindExistingFile(comp, sunat.DescargaXML); ok {
+		if xmlData, err := os.ReadFile(xmlPath); err == nil {
+			if sunat.IsZipContent(xmlData) {
+				if _, extractedXML, extractErr := sunat.ExtractFileFromZip(xmlData, ".xml"); extractErr == nil {
+					xmlData = extractedXML
+				} else {
+					xmlErr = fmt.Errorf("leyendo ZIP XML local: %w", extractErr)
+				}
+			}
+			if extracted, extractErr := sunat.ExtractUBLDescription(xmlData); extractErr == nil {
+				return descriptionAttempt(
+					comp,
+					extracted,
+					"extraído del XML local",
+					filepath.Base(xmlPath),
+					xmlPath,
+				)
+			} else {
+				xmlErr = fmt.Errorf("interpretando XML local: %w", extractErr)
+			}
+		} else {
+			xmlErr = fmt.Errorf("leyendo XML local: %w", err)
+		}
+	}
+
+	var xmlFile *sunat.DownloadedFile
+	var err error
+	if consultacpeAllowed {
+		xmlFile, err = e.client.DownloadXML(ctx, comp)
+	} else {
+		xmlFile, err = e.client.DownloadXMLFallback(ctx, comp)
+	}
+	if err == nil {
+		if integrityErr := sunat.ValidateContentIntegrity(xmlFile.Content, sunat.DescargaXML); integrityErr != nil {
+			xmlErr = integrityErr
+		} else if savedPath, saveErr := e.fileManager.SaveDownloadedFile(comp, xmlFile, sunat.DescargaXML); saveErr != nil {
+			xmlErr = fmt.Errorf("guardando XML para descripción: %w", saveErr)
+		} else if extracted, extractErr := sunat.ExtractUBLDescription(xmlFile.Content); extractErr != nil {
+			xmlErr = fmt.Errorf("interpretando XML descargado: %w", extractErr)
+		} else {
+			return descriptionAttempt(
+				comp,
+				extracted,
+				"extraído del XML descargado",
+				xmlFile.FileName,
+				savedPath,
+			)
+		}
+	} else {
+		xmlErr = err
+	}
+
+	if !consultacpeAllowed {
+		return failedAttempt(
+			comp,
+			sunat.DescargaDescripcion,
+			fmt.Errorf("no se pudo obtener el XML para extraer la descripción: %w", xmlErr),
+		)
+	}
+
+	direct, err := e.client.DownloadDescription(ctx, comp)
+	if err != nil {
+		if xmlErr != nil && isRecoverableAttempt(xmlErr) && !isRecoverableAttempt(err) {
+			return failedAttempt(
+				comp,
+				sunat.DescargaDescripcion,
+				fmt.Errorf("obteniendo XML para descripción: %w", xmlErr),
+			)
+		}
+		return failedAttempt(comp, sunat.DescargaDescripcion, err)
+	}
+	return descriptionAttempt(comp, direct, "consulta JSON de respaldo", "", "")
+}
+
+func descriptionAttempt(
+	comp sunat.Comprobante,
+	result sunat.DescriptionResult,
+	origin string,
+	xmlName string,
+	xmlPath string,
+) attemptResult {
+	return attemptResult{item: sunat.ItemResult{
+		Comprobante: comp,
+		Tipo:        sunat.DescargaDescripcion,
+		Exito:       true,
+		Descripcion: result.Description,
+		Placa:       result.VehiclePlate,
+		Origen:      origin,
+		XMLNombre:   xmlName,
+		XMLRuta:     xmlPath,
+	}}
+}
+
 func failedAttempt(comp sunat.Comprobante, tipo sunat.TipoDescarga, err error) attemptResult {
 	return attemptResult{
 		item: sunat.ItemResult{
 			Comprobante: comp,
 			Tipo:        tipo,
 			Exito:       false,
-			Error:       err.Error(),
+			Error:       safeResultError(err),
 		},
 		err: err,
 	}
+}
+
+func safeResultError(err error) string {
+	message := strings.TrimSpace(err.Error())
+	lower := strings.ToLower(message)
+	if strings.Contains(lower, "valarchivo") ||
+		strings.Contains(lower, "access_token") ||
+		strings.Contains(lower, "authorization") ||
+		strings.Contains(lower, "bearer ") ||
+		strings.Contains(lower, "client_secret") ||
+		strings.Contains(lower, "clavesol") ||
+		containsLongEncodedValue(message) {
+		if status, ok := sunat.HTTPStatus(err); ok {
+			return fmt.Sprintf("SUNAT respondió HTTP %d (detalle omitido por seguridad)", status)
+		}
+		return "detalle técnico omitido por seguridad"
+	}
+	const maxErrorLength = 800
+	if len(message) > maxErrorLength {
+		return message[:maxErrorLength] + "..."
+	}
+	return message
+}
+
+func containsLongEncodedValue(value string) bool {
+	run := 0
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '+' || char == '/' || char == '=' {
+			run++
+			if run >= 80 {
+				return true
+			}
+			continue
+		}
+		run = 0
+	}
+	return false
 }
 
 func blockedResults(
@@ -1389,6 +1694,85 @@ func (e *DownloadEngine) addLog(job *ActiveBatch, msg string) {
 	if len(job.Logs) > 500 {
 		job.Logs = job.Logs[len(job.Logs)-500:]
 	}
+}
+
+func (e *DownloadEngine) logTrafficAttempt(
+	job *ActiveBatch,
+	tipo sunat.TipoDescarga,
+	comp sunat.Comprobante,
+	attempt int,
+	duration time.Duration,
+	result attemptResult,
+) {
+	status := "OK"
+	classification := "completado"
+	if result.err == nil {
+		switch {
+		case strings.EqualFold(result.item.Origen, "archivo existente"):
+			status = "local"
+			classification = "reutilizado"
+		case tipo == sunat.DescargaCDR && strings.EqualFold(filepath.Ext(result.item.NomArchivo), ".zip"):
+			classification = "ZIP válido"
+		case tipo == sunat.DescargaCDR:
+			classification = "CDR XML válido"
+		}
+	} else if code, ok := sunat.HTTPStatus(result.err); ok {
+		status = fmt.Sprintf("HTTP %d", code)
+		if isRecoverableAttempt(result.err) {
+			classification = "transitorio"
+		} else {
+			classification = "definitivo"
+		}
+	} else if errors.Is(result.err, context.DeadlineExceeded) {
+		status = "timeout"
+		classification = "pendiente"
+	} else if errors.Is(result.err, context.Canceled) {
+		status = "cancelado"
+		classification = "definitivo"
+	} else if sunat.IsTransientDownloadError(result.err) {
+		status = "conexión"
+		classification = "transitorio"
+	} else {
+		status = "error"
+		classification = "definitivo"
+	}
+
+	line := fmt.Sprintf(
+		"%s %s-%s | intento %d | %s | %s | %s",
+		tipo,
+		strings.ToUpper(strings.TrimSpace(comp.Serie)),
+		sunat.NormalizeNumero(comp.Numero),
+		attempt,
+		status,
+		formatAttemptDuration(duration),
+		classification,
+	)
+	timestamped := fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), line)
+	job.Mu.Lock()
+	job.Traffic = append(job.Traffic, timestamped)
+	job.Logs = append(job.Logs, timestamped)
+	if len(job.Logs) > 500 {
+		job.Logs = job.Logs[len(job.Logs)-500:]
+	}
+	job.Mu.Unlock()
+}
+
+func stageUsesDocumentTimeout(tipo sunat.TipoDescarga) bool {
+	return tipo == sunat.DescargaXML || tipo == sunat.DescargaCDR || tipo == sunat.DescargaDescripcion
+}
+
+func isRecoverableAttempt(err error) bool {
+	if status, ok := sunat.HTTPStatus(err); ok && status == http.StatusUnauthorized {
+		return true
+	}
+	return sunat.IsTransientDownloadError(err)
+}
+
+func formatAttemptDuration(duration time.Duration) string {
+	if duration >= time.Second {
+		return fmt.Sprintf("%.1f s", duration.Seconds())
+	}
+	return fmt.Sprintf("%d ms", duration.Milliseconds())
 }
 
 func formatDuration(d time.Duration) string {

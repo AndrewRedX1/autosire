@@ -6,9 +6,10 @@ import "time"
 type TipoDescarga string
 
 const (
-	DescargaPDF TipoDescarga = "PDF"
-	DescargaXML TipoDescarga = "XML"
-	DescargaCDR TipoDescarga = "CDR"
+	DescargaPDF         TipoDescarga = "PDF"
+	DescargaXML         TipoDescarga = "XML"
+	DescargaCDR         TipoDescarga = "CDR"
+	DescargaDescripcion TipoDescarga = "DESC"
 )
 
 // SunatCredentials contiene las credenciales requeridas para autenticarse en SUNAT
@@ -72,6 +73,10 @@ type ItemResult struct {
 	CodigoCDR   string       `json:"codigo_cdr,omitempty"`   // "0", "2xxx", etc.
 	MensajeCDR  string       `json:"mensaje_cdr,omitempty"`  // Descripción oficial del CDR
 	DigestValue string       `json:"digest_value,omitempty"` // Hash digital extraído del XML
+	Descripcion string       `json:"descripcion,omitempty"`
+	Placa       string       `json:"placa,omitempty"`
+	XMLNombre   string       `json:"xml_nombre,omitempty"`
+	XMLRuta     string       `json:"xml_ruta,omitempty"`
 }
 
 // BatchStatus estado general de una sesión de descargas
@@ -82,6 +87,8 @@ type BatchStatus struct {
 	Procesados             int            `json:"procesados"`
 	Exitosos               int            `json:"exitosos"`
 	Errores                int            `json:"errores"`
+	PendientesReintento    int            `json:"pendientes_reintento"`
+	FallidosDefinitivos    int            `json:"fallidos_definitivos"`
 	Porcentaje             float64        `json:"porcentaje"`
 	Mensaje                string         `json:"mensaje"`
 	IniciadoEn             time.Time      `json:"iniciado_en"`
@@ -91,5 +98,6 @@ type BatchStatus struct {
 	TiempoRestanteEstimado string         `json:"tiempo_restante"`
 	HilosActivos           int            `json:"hilos_activos"`
 	ManifestPath           string         `json:"manifest_path,omitempty"`
+	TrafficLogPath         string         `json:"traffic_log_path,omitempty"`
 	ResumenCategorias      map[string]int `json:"resumen_categorias,omitempty"`
 }

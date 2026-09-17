@@ -34,6 +34,9 @@ AppSireCPE*
 **/data/*.db
 **/data/*.db-shm
 **/data/*.db-wal
+**/appsire.db
+**/appsire.db-shm
+**/appsire.db-wal
 **/data/licenses.json
 **/license.dat
 **/edge_profile/
