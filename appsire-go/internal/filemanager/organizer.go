@@ -67,11 +67,7 @@ func sanitizeFolderName(name string) string {
 // BuildDirectoryPath genera la ruta estructurada:
 // {BaseDir}/APP DESCARGAS/CPE/{RUC} {RazonSocial}/{Compras|Ventas}/{Periodo}
 func (m *FileManager) BuildDirectoryPath(comp sunat.Comprobante) string {
-	// Determinar Compras o Ventas según Libro
-	tipoLibro := "Ventas"
-	if comp.Libro == "2" || strings.EqualFold(comp.SheetName, "cpe") || strings.EqualFold(comp.SheetName, "rxh") {
-		tipoLibro = "Compras"
-	}
+	tipoLibro := bookFolder(comp)
 
 	// El macro crea una sola carpeta por empresa activa, libro y periodo. En
 	// compras, comp.RUC/RazonSocial pertenecen al proveedor y no deben fragmentar
@@ -104,6 +100,13 @@ func (m *FileManager) BuildDirectoryPath(comp sunat.Comprobante) string {
 
 	fullPath := filepath.Join(m.BaseDir, "APP DESCARGAS", "CPE", folderEmpresa, tipoLibro, periodoClean)
 	return fullPath
+}
+
+func bookFolder(comp sunat.Comprobante) string {
+	if comp.Libro == "2" || strings.EqualFold(comp.SheetName, "cpe") || strings.EqualFold(comp.SheetName, "rxh") {
+		return "Compras"
+	}
+	return "Ventas"
 }
 
 // SaveDownloadedFile guarda el archivo binario en el disco y devuelve la ruta completa
@@ -275,6 +278,98 @@ func (m *FileManager) FindExistingFile(
 	}
 
 	return "", false
+}
+
+// FindExistingResults reconstruye los estados de una propuesta SIRE desde los
+// archivos que ya existen en disco. La búsqueda se hace por el RUC de la
+// empresa propietaria y no por su razón social, porque ese nombre puede cambiar
+// entre descargas sin que los comprobantes dejen de pertenecer a la empresa.
+func (m *FileManager) FindExistingResults(
+	ownerRUC string,
+	comprobantes []sunat.Comprobante,
+	tipos []sunat.TipoDescarga,
+) []sunat.ItemResult {
+	ownerRUC = sanitizeFolderName(ownerRUC)
+	if ownerRUC == "" || len(comprobantes) == 0 || len(tipos) == 0 {
+		return nil
+	}
+
+	companyRoot := filepath.Join(m.BaseDir, "APP DESCARGAS", "CPE")
+	entries, err := os.ReadDir(companyRoot)
+	if err != nil {
+		return nil
+	}
+
+	companyDirs := make([]string, 0, len(entries))
+	prefix := ownerRUC + " "
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := strings.TrimSpace(entry.Name())
+		if strings.EqualFold(name, ownerRUC) ||
+			(len(name) > len(prefix) && strings.EqualFold(name[:len(prefix)], prefix)) {
+			companyDirs = append(companyDirs, filepath.Join(companyRoot, entry.Name()))
+		}
+	}
+	if len(companyDirs) == 0 {
+		return nil
+	}
+
+	type scope struct {
+		book   string
+		period string
+	}
+	directories := make(map[scope][]string)
+	results := make([]sunat.ItemResult, 0)
+	for _, comp := range comprobantes {
+		currentScope := scope{
+			book:   bookFolder(comp),
+			period: sanitizeFolderName(comp.Periodo),
+		}
+		if currentScope.period == "" {
+			currentScope.period = "VARIOS"
+		}
+		candidateDirs, loaded := directories[currentScope]
+		if !loaded {
+			for _, companyDir := range companyDirs {
+				directory := filepath.Join(companyDir, currentScope.book, currentScope.period)
+				if m.ensureDirectoryIndexed(directory) {
+					candidateDirs = append(candidateDirs, directory)
+				}
+			}
+			directories[currentScope] = candidateDirs
+		}
+
+		docKey := documentKey(comp.RUC, comp.Tipo, comp.Serie, comp.Numero)
+		for _, tipo := range tipos {
+			if tipo == sunat.DescargaCDR && strings.HasPrefix(strings.ToUpper(strings.TrimSpace(comp.Serie)), "E") {
+				continue
+			}
+			key := downloadIndexKey(tipo, docKey)
+			for _, directory := range candidateDirs {
+				m.indexMu.RLock()
+				file, found := m.directoryIndex[directory][key]
+				m.indexMu.RUnlock()
+				if !found || file.size <= 0 {
+					continue
+				}
+				results = append(results, sunat.ItemResult{
+					Comprobante: comp,
+					Tipo:        tipo,
+					Exito:       true,
+					NomArchivo:  file.name,
+					RutaLocal:   filepath.Join(directory, file.name),
+					TamanoBytes: file.size,
+					Origen:      "archivo existente",
+					Categoria:   "ya_existente",
+				})
+				break
+			}
+		}
+	}
+
+	return results
 }
 
 func (m *FileManager) ensureDirectoryIndexed(targetDir string) bool {

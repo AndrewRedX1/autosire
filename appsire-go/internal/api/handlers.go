@@ -116,12 +116,15 @@ func SameOrigin(next http.Handler) http.Handler {
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
+		// La aplicación usa un iframe del mismo origen para visualizar PDFs.
+		// SAMEORIGIN mantiene bloqueado el embedding externo sin impedir el visor.
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set(
 			"Content-Security-Policy",
 			"default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
-				"font-src https://fonts.gstatic.com; script-src 'self'; img-src 'self' data:; connect-src 'self'",
+				"font-src https://fonts.gstatic.com; script-src 'self'; img-src 'self' data:; "+
+				"connect-src 'self'; frame-src 'self'",
 		)
 		next.ServeHTTP(w, r)
 	})
@@ -320,6 +323,11 @@ func (s *Server) HandleDownloadSireProposal(w http.ResponseWriter, r *http.Reque
 		respondError(w, http.StatusUnprocessableEntity, "La propuesta fue guardada, pero no se pudo visualizar: "+err.Error())
 		return
 	}
+	existingFiles := s.fileManager.FindExistingResults(
+		credentials.RUC,
+		preview.Comprobantes,
+		[]sunat.TipoDescarga{sunat.DescargaXML, sunat.DescargaCDR, sunat.DescargaPDF},
+	)
 	s.proposalMu.Lock()
 	s.proposals[proposal.Book] = proposalBinding{
 		RUC:    credentials.RUC,
@@ -329,15 +337,16 @@ func (s *Server) HandleDownloadSireProposal(w http.ResponseWriter, r *http.Reque
 	s.proposalMu.Unlock()
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"success":     true,
-		"libro":       proposal.Book,
-		"periodo":     proposal.Period,
-		"ticket":      proposal.Ticket,
-		"file_name":   proposal.FileName,
-		"path":        path,
-		"reutilizado": proposal.Reused,
-		"generado_en": proposal.Generated,
-		"preview":     preview,
+		"success":             true,
+		"libro":               proposal.Book,
+		"periodo":             proposal.Period,
+		"ticket":              proposal.Ticket,
+		"file_name":           proposal.FileName,
+		"path":                path,
+		"reutilizado":         proposal.Reused,
+		"generado_en":         proposal.Generated,
+		"preview":             preview,
+		"archivos_existentes": existingFiles,
 	})
 }
 
@@ -674,6 +683,11 @@ func (s *Server) HandleViewFile(w http.ResponseWriter, r *http.Request) {
 		if serveZIPPreview(w, requestedPath) {
 			return
 		}
+	}
+	if strings.EqualFold(filepath.Ext(requestedPath), ".pdf") {
+		// No depender del registro MIME de Windows: con nosniff el navegador
+		// necesita este valor exacto para activar su visor PDF integrado.
+		w.Header().Set("Content-Type", "application/pdf")
 	}
 	w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename=%q", disposition, filepath.Base(requestedPath)))
 	http.ServeFile(w, r, requestedPath)

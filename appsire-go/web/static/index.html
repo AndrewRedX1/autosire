@@ -108,6 +108,11 @@
             </button>
           </div>
         </div>
+
+        <button type="button" class="sidebar-link" data-view="viewArchivador" id="navLinkArchivador">
+          <span class="nav-icon">📁</span>
+          <span class="nav-label">Archivador Digital</span>
+        </button>
       </nav>
 
       <div class="sidebar-foot">
@@ -330,6 +335,64 @@
                   </div>
                 </div>
                 <div class="sire-toolbar-actions">
+                  <div class="dropdown-wrap" id="wrapValidacionesRce">
+                    <button type="button" class="btn btn-sm btn-secondary dropdown-toggle" id="btnValidacionesRce" title="Validaciones de Comprobantes RCE">
+                      <span class="btn-icon">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                          <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                      </span>
+                      <span>Validaciones</span>
+                      <svg class="dropdown-chevron" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                      </svg>
+                    </button>
+                    <div class="dropdown-menu" id="menuValidacionesRce">
+                      <button type="button" class="dropdown-item" data-action="val-tc" data-book="RCE">
+                        <span class="item-icon">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 12V7h-5"></path>
+                            <path d="M3 12v5h5"></path>
+                            <path d="M3 12a9 9 0 0 1 15-6.7L21 7"></path>
+                            <path d="M21 12a9 9 0 0 1-15 6.7L3 17"></path>
+                          </svg>
+                        </span>
+                        <span>Validar T.Cambio</span>
+                      </button>
+                      <button type="button" class="dropdown-item" data-action="val-cpe" data-book="RCE">
+                        <span class="item-icon">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="16 10 11 15 8 12"></polyline>
+                          </svg>
+                        </span>
+                        <span>Validar CPE</span>
+                      </button>
+                      <button type="button" class="dropdown-item" data-action="val-ssco" data-book="RCE">
+                        <span class="item-icon">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                            <line x1="12" y1="8" x2="12" y2="12"></line>
+                            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                          </svg>
+                        </span>
+                        <span>Validar SSCO</span>
+                      </button>
+                      <button type="button" class="dropdown-item" data-action="val-cuadre" data-book="RCE">
+                        <span class="item-icon">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="4" y="2" width="16" height="20" rx="2"></rect>
+                            <line x1="8" y1="6" x2="16" y2="6"></line>
+                            <line x1="16" y1="14" x2="16" y2="18"></line>
+                            <circle cx="9" cy="11" r="1"></circle>
+                            <circle cx="15" cy="11" r="1"></circle>
+                            <circle cx="9" cy="15" r="1"></circle>
+                          </svg>
+                        </span>
+                        <span>Cuadrar Importes</span>
+                      </button>
+                    </div>
+                  </div>
                   <button type="button" class="btn btn-sm btn-secondary" id="btnDescargaXmlRce" title="Descarga de archivos XML">
                     <span class="btn-icon">📥</span>
                     <span>Descarga XML</span>
@@ -439,6 +502,67 @@
                   </div>
                 </div>
                 <div class="sire-toolbar-actions">
+                  <div class="dropdown-wrap" id="wrapValidacionesRvie">
+                    <button type="button" class="btn btn-sm btn-secondary dropdown-toggle" id="btnValidacionesRvie" title="Validaciones de Comprobantes RVIE">
+                      <span class="btn-icon">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                          <polyline points="20 6 9 17 4 12"></polyline>
+                        </svg>
+                      </span>
+                      <span>Validaciones</span>
+                      <svg class="dropdown-chevron" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                      </svg>
+                    </button>
+                    <div class="dropdown-menu" id="menuValidacionesRvie">
+                      <button type="button" class="dropdown-item" data-action="val-tc" data-book="RVIE">
+                        <span class="item-icon">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 12V7h-5"></path>
+                            <path d="M3 12v5h5"></path>
+                            <path d="M3 12a9 9 0 0 1 15-6.7L21 7"></path>
+                            <path d="M21 12a9 9 0 0 1-15 6.7L3 17"></path>
+                          </svg>
+                        </span>
+                        <span>Validar T.Cambio</span>
+                      </button>
+                      <button type="button" class="dropdown-item" data-action="val-cpe" data-book="RVIE">
+                        <span class="item-icon">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="16 10 11 15 8 12"></polyline>
+                          </svg>
+                        </span>
+                        <span>Validar CPE</span>
+                      </button>
+                      <button type="button" class="dropdown-item" data-action="val-correl" data-book="RVIE">
+                        <span class="item-icon">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="10" y1="6" x2="21" y2="6"></line>
+                            <line x1="10" y1="12" x2="21" y2="12"></line>
+                            <line x1="10" y1="18" x2="21" y2="18"></line>
+                            <path d="M4 6h1v4"></path>
+                            <path d="M4 10h2"></path>
+                            <path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"></path>
+                          </svg>
+                        </span>
+                        <span>Validar Correlativos</span>
+                      </button>
+                      <button type="button" class="dropdown-item" data-action="val-cuadre" data-book="RVIE">
+                        <span class="item-icon">
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="4" y="2" width="16" height="20" rx="2"></rect>
+                            <line x1="8" y1="6" x2="16" y2="6"></line>
+                            <line x1="16" y1="14" x2="16" y2="18"></line>
+                            <circle cx="9" cy="11" r="1"></circle>
+                            <circle cx="15" cy="11" r="1"></circle>
+                            <circle cx="9" cy="15" r="1"></circle>
+                          </svg>
+                        </span>
+                        <span>Cuadrar Importes</span>
+                      </button>
+                    </div>
+                  </div>
                   <button type="button" class="btn btn-sm btn-secondary" id="btnDescargaXmlRvie" title="Descarga de archivos XML">
                     <span class="btn-icon">📥</span>
                     <span>Descarga XML</span>
@@ -501,6 +625,154 @@
             </div>
           </section>
         </main>
+      </div>
+
+      <!-- =======================================================
+           VISTA 4: ARCHIVADOR DIGITAL (NOTION UI)
+           ======================================================= -->
+      <div id="viewArchivador" class="app-view" style="display:none;">
+        <section class="notion-workspace-page">
+          <!-- Encabezado Notion -->
+          <div class="notion-page-header">
+            <div class="notion-page-title-row">
+              <span class="notion-page-emoji">📁</span>
+              <div>
+                <h1 class="notion-page-heading">Archivador Digital</h1>
+                <p class="notion-page-subtext">Repositorio local de comprobantes electrónicos (XML, CDR, PDF) organizados por empresa, libro y período.</p>
+              </div>
+            </div>
+            <div class="notion-page-actions">
+              <button type="button" class="btn btn-secondary" id="btnArchiveRefresh" title="Volver a escanear el almacenamiento local">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                <span>Refrescar</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Métricas en Cards Notion -->
+          <div class="stats-counters" style="margin-bottom: 20px;">
+            <div class="stat-card">
+              <span class="stat-label">Total Archivos</span>
+              <span class="stat-value" id="archiveStatTotal">0</span>
+            </div>
+            <div class="stat-card stat-success">
+              <span class="stat-label">XMLs UBL</span>
+              <span class="stat-value" id="archiveStatXml">0</span>
+            </div>
+            <div class="stat-card stat-speed">
+              <span class="stat-label">CDRs Validados</span>
+              <span class="stat-value" id="archiveStatCdr">0</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">PDFs Representación</span>
+              <span class="stat-value" id="archiveStatPdf">0</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Espacio en Disco</span>
+              <span class="stat-value" id="archiveStatSize">0 MB</span>
+            </div>
+          </div>
+
+          <!-- Pestañas Notion: Por Período vs Por Comprobante -->
+          <div class="tabs-header" style="margin-bottom: 16px;">
+            <button type="button" class="tab-btn active" id="tabArchivePeriodsBtn">📅 Descargas por Período</button>
+            <button type="button" class="tab-btn" id="tabArchiveVouchersBtn">📑 Comprobantes Detallados</button>
+          </div>
+
+          <!-- 1. VISTA POR PERÍODOS (Cards anchos tipo fila/tabla) -->
+          <div id="archivePeriodsView" class="archive-tab-pane active">
+            <div class="archive-periods-container" id="archivePeriodsGrid">
+              <div style="text-align: center; color: var(--notion-text-subtle); padding: 40px;">
+                <span class="spinner" style="display:inline-block; margin-right:8px;"></span> Escaneando períodos descargados...
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. VISTA DETALLADA DE COMPROBANTES CONSOLIDADOS (XML, CDR, PDF) -->
+          <div id="archiveVouchersView" class="archive-tab-pane" style="display:none;">
+            <div class="notion-db-card">
+              <!-- Toolbar de Filtros -->
+              <div class="notion-db-toolbar">
+                <div class="notion-db-search">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                  <input type="text" id="txtArchiveSearch" placeholder="Buscar por RUC, serie, correlativo..." autocomplete="off">
+                </div>
+
+                <div class="notion-db-filters">
+                  <div class="notion-filter-item">
+                    <label for="cboArchiveCompany">Empresa:</label>
+                    <select id="cboArchiveCompany" class="notion-select-sm">
+                      <option value="">(Todas las empresas)</option>
+                    </select>
+                  </div>
+
+                  <div class="notion-filter-item">
+                    <label for="cboArchiveBook">Libro:</label>
+                    <select id="cboArchiveBook" class="notion-select-sm">
+                      <option value="">(Todos los libros)</option>
+                      <option value="Compras">Compras (RCE)</option>
+                      <option value="Ventas">Ventas (RVIE)</option>
+                    </select>
+                  </div>
+
+                  <div class="notion-filter-item">
+                    <label for="cboArchivePeriod">Periodo:</label>
+                    <select id="cboArchivePeriod" class="notion-select-sm">
+                      <option value="">(Todos los periodos)</option>
+                    </select>
+                  </div>
+
+                  <div class="notion-filter-item">
+                    <label for="cboArchiveFormat">Filtrar por:</label>
+                    <select id="cboArchiveFormat" class="notion-select-sm">
+                      <option value="TODOS">Todos los comprobantes</option>
+                      <option value="XML">Solo con XML</option>
+                      <option value="CDR">Solo con CDR</option>
+                      <option value="PDF">Solo con PDF</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Tabla de Comprobantes Consolidados -->
+              <div class="table-responsive sire-table-scroll">
+                <table class="data-table notion-proposal-table" id="archiveTable">
+                  <thead>
+                    <tr>
+                      <th style="width: 45px; text-align: center;">N°</th>
+                      <th>Tipo</th>
+                      <th>Serie - Número</th>
+                      <th>RUC Emisor</th>
+                      <th>Libro</th>
+                      <th>Periodo</th>
+                      <th style="width: 90px; text-align: center;">XML</th>
+                      <th style="width: 90px; text-align: center;">CDR</th>
+                      <th style="width: 90px; text-align: center;">PDF</th>
+                      <th style="width: 75px; text-align: center;">Carpeta</th>
+                    </tr>
+                  </thead>
+                  <tbody id="archiveTableBody">
+                    <tr>
+                      <td colspan="10" style="text-align: center; color: var(--notion-text-subtle); padding: 32px;">
+                        Cargando comprobantes...
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Footer / Paginación -->
+              <div class="archive-table-footer" id="archiveTableFooter" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-top: 1px solid var(--notion-border); font-size: 0.82rem; color: var(--notion-text-muted);">
+                <span id="archiveFileCountLabel">0 comprobantes encontrados</span>
+                <div class="archive-pagination-btns" style="display: flex; gap: 8px;">
+                  <button type="button" class="btn btn-secondary btn-sm" id="btnArchivePrevPage" disabled>Anterior</button>
+                  <span id="archivePageIndicator" style="display: inline-flex; align-items: center; padding: 0 6px;">Pág. 1 / 1</span>
+                  <button type="button" class="btn btn-secondary btn-sm" id="btnArchiveNextPage" disabled>Siguiente</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
 
       <!-- =======================================================

@@ -115,6 +115,10 @@ func main() {
 	mux.HandleFunc("/api/files/download-zip", server.RequireSession(server.HandleDownloadZip))
 	mux.HandleFunc("/api/files/view", server.RequireSession(server.HandleViewFile))
 	mux.HandleFunc("/api/files/xml-preview", server.RequireSession(server.HandleXMLPreview))
+	mux.HandleFunc("/api/archive/tree", server.RequireSession(server.HandleArchiveTree))
+	mux.HandleFunc("/api/archive/files", server.RequireSession(server.HandleArchiveFiles))
+	mux.HandleFunc("/api/archive/open", server.RequireSession(server.HandleArchiveOpen))
+	mux.HandleFunc("/api/archive/zip", server.RequireSession(server.HandleArchiveDownloadZip))
 	// Rutas de Ciclo de Vida de la Ventana (Watchdog de escritorio)
 	var (
 		shutdownMu    sync.Mutex

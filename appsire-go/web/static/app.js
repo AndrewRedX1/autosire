@@ -150,11 +150,36 @@ document.addEventListener('DOMContentLoaded', () => {
   const viewEmpresas = $('viewEmpresas');
   const viewRce = $('viewRce');
   const viewRvie = $('viewRvie');
+  const viewArchivador = $('viewArchivador');
   const navLinkEmpresas = $('navLinkEmpresas');
   const navGroupSire = $('navGroupSire');
   const sidebarGroupSire = $('sidebarGroupSire');
   const navLinkRce = $('navLinkRce');
   const navLinkRvie = $('navLinkRvie');
+  const navLinkArchivador = $('navLinkArchivador');
+  const btnArchiveOpenFolder = $('btnArchiveOpenFolder');
+  const btnArchiveRefresh = $('btnArchiveRefresh');
+  const btnArchiveExportZip = $('btnArchiveExportZip');
+  const txtArchiveSearch = $('txtArchiveSearch');
+  const cboArchiveCompany = $('cboArchiveCompany');
+  const cboArchiveBook = $('cboArchiveBook');
+  const cboArchivePeriod = $('cboArchivePeriod');
+  const cboArchiveFormat = $('cboArchiveFormat');
+  const archiveTableBody = $('archiveTableBody');
+  const archiveStatTotal = $('archiveStatTotal');
+  const archiveStatXml = $('archiveStatXml');
+  const archiveStatCdr = $('archiveStatCdr');
+  const archiveStatPdf = $('archiveStatPdf');
+  const archiveStatSize = $('archiveStatSize');
+  const archiveFileCountLabel = $('archiveFileCountLabel');
+  const btnArchivePrevPage = $('btnArchivePrevPage');
+  const btnArchiveNextPage = $('btnArchiveNextPage');
+  const archivePageIndicator = $('archivePageIndicator');
+  const tabArchivePeriodsBtn = $('tabArchivePeriodsBtn');
+  const tabArchiveVouchersBtn = $('tabArchiveVouchersBtn');
+  const archivePeriodsView = $('archivePeriodsView');
+  const archiveVouchersView = $('archiveVouchersView');
+  const archivePeriodsGrid = $('archivePeriodsGrid');
   const btnCollapseSidebar = $('btnCollapseSidebar');
   const btnExpandSidebar = $('btnExpandSidebar');
   const btnHeaderSwitchCompany = $('btnHeaderSwitchCompany');
@@ -248,7 +273,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const views = {
       viewEmpresas: { el: viewEmpresas, link: navLinkEmpresas },
       viewRce: { el: viewRce, link: navLinkRce },
-      viewRvie: { el: viewRvie, link: navLinkRvie }
+      viewRvie: { el: viewRvie, link: navLinkRvie },
+      viewArchivador: { el: viewArchivador, link: navLinkArchivador }
     };
 
     // Ocultar todas las vistas y remover clases activas
@@ -284,6 +310,11 @@ document.addEventListener('DOMContentLoaded', () => {
         sireSharedDownloads.style.display = 'none';
       }
       syncCompanyTitlesInViews();
+    } else if (targetViewId === 'viewArchivador') {
+      if (sireSharedDownloads) {
+        sireSharedDownloads.style.display = 'none';
+      }
+      initArchiveView();
     } else {
       if (sireSharedDownloads) {
         sireSharedDownloads.style.display = 'none';
@@ -485,7 +516,40 @@ document.addEventListener('DOMContentLoaded', () => {
       for (const [buttonName, type] of [['Xml', 'XML'], ['Cdr', 'CDR'], ['Pdf', 'PDF'], ['Desc', 'DESC']]) {
         $(`btnDescarga${buttonName}${suffix}`)?.addEventListener('click', () => startProposalDownload(book, type));
       }
+
+      // Dropdown de Validaciones
+      const btnVal = $(`btnValidaciones${suffix}`);
+      const wrapVal = $(`wrapValidaciones${suffix}`);
+      if (btnVal && wrapVal) {
+        btnVal.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const isOpen = wrapVal.classList.contains('open');
+          document.querySelectorAll('.dropdown-wrap.open').forEach((w) => w.classList.remove('open'));
+          if (!isOpen) {
+            wrapVal.classList.add('open');
+          }
+        });
+      }
     }
+
+    // Cerrar dropdowns al hacer clic fuera
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.dropdown-wrap')) {
+        document.querySelectorAll('.dropdown-wrap.open').forEach((w) => w.classList.remove('open'));
+      }
+    });
+
+    // Manejo de clic en ítems de validación (por el momento sólo UI)
+    document.querySelectorAll('.dropdown-menu .dropdown-item').forEach((item) => {
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const wrap = item.closest('.dropdown-wrap');
+        if (wrap) wrap.classList.remove('open');
+        const label = item.querySelector('span:last-child')?.textContent || 'Opción';
+        const book = item.dataset.book || '';
+        showToast(`${label} (${book}) — Función en preparación`, 'info');
+      });
+    });
 
     $('uploadedRecordsBody').addEventListener('click', handleRecordAction);
     $('proposalPreviewBodyRce')?.addEventListener('click', handleRecordAction);
@@ -503,6 +567,58 @@ document.addEventListener('DOMContentLoaded', () => {
       window.location.href = '/api/files/download-zip';
     });
 
+    // Eventos Archivador Digital
+    navLinkArchivador?.addEventListener('click', () => switchView('viewArchivador'));
+    btnArchiveRefresh?.addEventListener('click', async () => {
+      await loadArchiveTree();
+      renderArchivePeriodCards();
+      loadArchiveFiles();
+      showToast('Archivador digital actualizado', 'success');
+    });
+    btnArchiveOpenFolder?.addEventListener('click', () => openArchiveFolder());
+    btnArchiveExportZip?.addEventListener('click', () => exportArchiveZip());
+    tabArchivePeriodsBtn?.addEventListener('click', () => switchArchiveTab('periods'));
+    tabArchiveVouchersBtn?.addEventListener('click', () => switchArchiveTab('vouchers'));
+    archivePeriodsGrid?.addEventListener('click', handleArchivePeriodClick);
+    cboArchiveCompany?.addEventListener('change', () => {
+      populateArchivePeriods();
+      archiveCurrentPage = 1;
+      loadArchiveFiles();
+    });
+    cboArchiveBook?.addEventListener('change', () => {
+      populateArchivePeriods();
+      archiveCurrentPage = 1;
+      loadArchiveFiles();
+    });
+    cboArchivePeriod?.addEventListener('change', () => {
+      archiveCurrentPage = 1;
+      loadArchiveFiles();
+    });
+    cboArchiveFormat?.addEventListener('change', () => {
+      archiveCurrentPage = 1;
+      loadArchiveFiles();
+    });
+    txtArchiveSearch?.addEventListener('input', () => {
+      if (archiveSearchTimeout) clearTimeout(archiveSearchTimeout);
+      archiveSearchTimeout = setTimeout(() => {
+        archiveCurrentPage = 1;
+        loadArchiveFiles();
+      }, 250);
+    });
+    btnArchivePrevPage?.addEventListener('click', () => {
+      if (archiveCurrentPage > 1) {
+        archiveCurrentPage--;
+        loadArchiveFiles();
+      }
+    });
+    btnArchiveNextPage?.addEventListener('click', () => {
+      if (archiveCurrentPage < archiveTotalPages) {
+        archiveCurrentPage++;
+        loadArchiveFiles();
+      }
+    });
+    archiveTableBody?.addEventListener('click', handleArchiveTableClick);
+
     const themeToggle = $('themeToggleBtn');
     if (themeToggle) {
       themeToggle.addEventListener('click', toggleTheme);
@@ -510,10 +626,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.querySelectorAll('.tab-btn').forEach((button) => {
       button.addEventListener('click', () => {
+        if (!button.dataset.tab) return;
         document.querySelectorAll('.tab-btn').forEach((item) => item.classList.remove('active'));
         document.querySelectorAll('.tab-content').forEach((item) => item.classList.remove('active'));
         button.classList.add('active');
-        $(button.dataset.tab).classList.add('active');
+        $(button.dataset.tab)?.classList.add('active');
       });
     });
   }
@@ -950,6 +1067,9 @@ document.addEventListener('DOMContentLoaded', () => {
         };
       }
 
+      clearProposalArtifactStatuses(isRce);
+      recordProposalResults(isRce, data.archivos_existentes || []);
+
       currentProposalView = { preview: data.preview, href: `/api/files/view?download=1&path=${encodeURIComponent(data.path)}`, book, period: data.periodo };
 
       const fileBtn = $(isRce ? 'btnDownloadOfficialFileRce' : 'btnDownloadOfficialFileRvie');
@@ -991,6 +1111,11 @@ document.addEventListener('DOMContentLoaded', () => {
   function proposalStatusMap(isRce, type) {
     const maps = isRce ? proposalStatusMapsRce : proposalStatusMapsRvie;
     return maps[type];
+  }
+
+  function clearProposalArtifactStatuses(isRce) {
+    const maps = isRce ? proposalStatusMapsRce : proposalStatusMapsRvie;
+    Object.values(maps).forEach((statusMap) => statusMap.clear());
   }
 
   function clearProposalState() {
@@ -1063,6 +1188,51 @@ document.addEventListener('DOMContentLoaded', () => {
     numero = normalizeNumero(numero);
 
     return `${tipo}-${serie}-${numero}`;
+  }
+
+  function recordProposalResults(isRce, resultados) {
+    if (!resultados || !resultados.length) return;
+    for (const res of resultados) {
+      if (!res?.comprobante) continue;
+      const resultType = String(res.tipo || '').toUpperCase();
+      const statusMap = proposalStatusMap(isRce, resultType);
+      if (!statusMap) continue;
+
+      const key = getCompKey(res.comprobante);
+      const tipo = String(res.comprobante.tipo || '').padStart(2, '0').trim();
+      const serie = String(res.comprobante.serie || '').toUpperCase().trim();
+      const numero = normalizeNumero(res.comprobante.numero);
+      const fallbackKey = `${tipo}-${serie}-${numero}`;
+      const val = {
+        exito: res.exito,
+        error: res.error || (res.exito ? '' : `No se pudo obtener ${proposalDownloadLabel(resultType)} de SUNAT`),
+        nom_archivo: res.nom_archivo,
+        ruta_local: res.ruta_local,
+        descripcion: res.descripcion,
+        placa: res.placa,
+        estado_cdr: res.estado_cdr,
+        codigo_cdr: res.codigo_cdr,
+        mensaje_cdr: res.mensaje_cdr
+      };
+      statusMap.set(key, val);
+      statusMap.set(fallbackKey, val);
+      if (res.exito && res.ruta_local) {
+        downloadedFiles.set(fileKey(res.comprobante, resultType), res.ruta_local);
+      }
+
+      if (resultType === 'DESC' && res.xml_ruta) {
+        const xmlValue = {
+          exito: true,
+          error: '',
+          nom_archivo: res.xml_nombre || 'XML',
+          ruta_local: res.xml_ruta
+        };
+        const xmlMap = proposalStatusMap(isRce, 'XML');
+        xmlMap.set(key, xmlValue);
+        xmlMap.set(fallbackKey, xmlValue);
+        downloadedFiles.set(fileKey(res.comprobante, 'XML'), res.xml_ruta);
+      }
+    }
   }
 
   function renderProposalPreviewForBook(book, preview, bookName, period) {
@@ -1537,44 +1707,6 @@ document.addEventListener('DOMContentLoaded', () => {
       let finished = false;
       let sse = null;
       let pollInterval = null;
-      const statusMap = proposalStatusMap(isRce, type);
-
-      const recordResults = (resultados) => {
-        if (!resultados || !resultados.length) return;
-        for (const res of resultados) {
-          if (!res?.comprobante) continue;
-          const key = getCompKey(res.comprobante);
-          const val = {
-            exito: res.exito,
-            error: res.error || (res.exito ? '' : `No se pudo obtener ${proposalDownloadLabel(type)} de SUNAT`),
-            nom_archivo: res.nom_archivo,
-            ruta_local: res.ruta_local,
-            descripcion: res.descripcion,
-            placa: res.placa,
-            estado_cdr: res.estado_cdr,
-            codigo_cdr: res.codigo_cdr,
-            mensaje_cdr: res.mensaje_cdr
-          };
-          statusMap.set(key, val);
-          const tipo = String(res.comprobante.tipo || '').padStart(2, '0').trim();
-          const serie = String(res.comprobante.serie || '').toUpperCase().trim();
-          const numero = normalizeNumero(res.comprobante.numero);
-          const fallbackKey = `${tipo}-${serie}-${numero}`;
-          statusMap.set(fallbackKey, val);
-          if (type === 'DESC' && res.xml_ruta) {
-            const xmlValue = {
-              exito: true,
-              error: '',
-              nom_archivo: res.xml_nombre || 'XML',
-              ruta_local: res.xml_ruta
-            };
-            const xmlMap = proposalStatusMap(isRce, 'XML');
-            xmlMap.set(key, xmlValue);
-            xmlMap.set(fallbackKey, xmlValue);
-          }
-        }
-      };
-
       const cleanup = (finalStatus) => {
         if (finished) return;
         finished = true;
@@ -1583,7 +1715,7 @@ document.addEventListener('DOMContentLoaded', () => {
         progressModal.close();
 
         if (finalStatus?.resultados) {
-          recordResults(finalStatus.resultados);
+          recordProposalResults(isRce, finalStatus.resultados);
         }
 
         // Refrescar la tabla para mostrar checks, errores y descripciones.
@@ -1630,7 +1762,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!status) return;
         progressModal.update(status);
         if (status.resultados) {
-          recordResults(status.resultados);
+          recordProposalResults(isRce, status.resultados);
         }
         if (['completado', 'detenido', 'error'].includes(status.estado)) {
           cleanup(status);
@@ -2490,6 +2622,527 @@ document.addEventListener('DOMContentLoaded', () => {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  // =========================================================================
+  // MÓDULO: ARCHIVADOR DIGITAL
+  // =========================================================================
+
+  let archiveTree = null;
+  let archiveTreeLoaded = false;
+  let archiveCurrentPage = 1;
+  const archivePageSize = 50;
+  let archiveTotalPages = 1;
+  let archiveSearchTimeout = null;
+  let activeArchiveTab = 'periods';
+
+  async function readArchiveJSON(response, fallbackMessage) {
+    const body = await response.text();
+    let data = null;
+    if (body.trim()) {
+      try {
+        data = JSON.parse(body);
+      } catch (_) {
+        if (response.status === 404) {
+          throw new Error('El servidor activo no incluye las rutas del Archivador Digital. Actualiza y reinicia el ejecutable.');
+        }
+        throw new Error(`${fallbackMessage} (respuesta HTTP ${response.status || 'inválida'})`);
+      }
+    }
+    if (!response.ok) {
+      throw new Error(data?.error || `${fallbackMessage} (HTTP ${response.status})`);
+    }
+    if (!data) {
+      throw new Error(`${fallbackMessage}: el servidor devolvió una respuesta vacía`);
+    }
+    return data;
+  }
+
+  function switchArchiveTab(tab) {
+    activeArchiveTab = tab;
+    if (tab === 'periods') {
+      tabArchivePeriodsBtn?.classList.add('active');
+      tabArchiveVouchersBtn?.classList.remove('active');
+      if (archivePeriodsView) archivePeriodsView.style.display = 'block';
+      if (archiveVouchersView) archiveVouchersView.style.display = 'none';
+      renderArchivePeriodCards();
+    } else {
+      tabArchivePeriodsBtn?.classList.remove('active');
+      tabArchiveVouchersBtn?.classList.add('active');
+      if (archivePeriodsView) archivePeriodsView.style.display = 'none';
+      if (archiveVouchersView) archiveVouchersView.style.display = 'block';
+      loadArchiveFiles();
+    }
+  }
+
+  async function initArchiveView() {
+    await loadArchiveTree();
+    // Preseleccionar empresa activa si aplica
+    if (activeCompany && cboArchiveCompany && (!cboArchiveCompany.value || cboArchiveCompany.value === '')) {
+      const targetOption = Array.from(cboArchiveCompany.options).find(opt => opt.value.startsWith(activeCompany.ruc));
+      if (targetOption) {
+        cboArchiveCompany.value = targetOption.value;
+        populateArchivePeriods();
+      }
+    }
+    renderArchivePeriodCards();
+    if (activeArchiveTab === 'vouchers') {
+      loadArchiveFiles();
+    }
+  }
+
+  async function loadArchiveTree() {
+    try {
+      const res = await apiFetch('/api/archive/tree');
+      const data = await readArchiveJSON(res, 'No se pudo leer el archivador');
+      if (!data.success) {
+        throw new Error(data.error || 'Error al leer árbol del archivador');
+      }
+      archiveTree = data;
+      archiveTreeLoaded = true;
+
+      // Actualizar estadísticas globales
+      if (archiveStatTotal) archiveStatTotal.textContent = (data.total_files || 0).toLocaleString();
+      if (archiveStatSize) archiveStatSize.textContent = formatBytes(data.total_bytes || 0);
+
+      // Llenar combo de empresas
+      if (cboArchiveCompany) {
+        const currentVal = cboArchiveCompany.value;
+        cboArchiveCompany.innerHTML = '<option value="">(Todas las empresas)</option>';
+        (data.companies || []).forEach(comp => {
+          const opt = document.createElement('option');
+          opt.value = comp.folder;
+          opt.textContent = `${comp.ruc} — ${comp.name} (${comp.total_files} docs)`;
+          cboArchiveCompany.appendChild(opt);
+        });
+        if (currentVal) cboArchiveCompany.value = currentVal;
+      }
+
+      populateArchivePeriods();
+    } catch (err) {
+      console.error('Error cargando archivador:', err);
+      showToast('No se pudo cargar el archivador: ' + err.message, 'error');
+    }
+  }
+
+  function populateArchivePeriods() {
+    if (!cboArchivePeriod || !archiveTree) return;
+    const selectedCompanyFolder = cboArchiveCompany?.value || '';
+    const selectedBook = cboArchiveBook?.value || '';
+    const currentVal = cboArchivePeriod.value;
+
+    const periodsSet = new Set();
+
+    (archiveTree.companies || []).forEach(comp => {
+      if (selectedCompanyFolder && comp.folder !== selectedCompanyFolder) return;
+      (comp.books || []).forEach(book => {
+        if (selectedBook && !book.name.toLowerCase().includes(selectedBook.toLowerCase())) return;
+        (book.periods || []).forEach(p => {
+          if (p.period) periodsSet.add(p.period);
+        });
+      });
+    });
+
+    const sortedPeriods = Array.from(periodsSet).sort().reverse();
+    cboArchivePeriod.innerHTML = '<option value="">(Todos los periodos)</option>';
+    sortedPeriods.forEach(period => {
+      const opt = document.createElement('option');
+      opt.value = period;
+      opt.textContent = formatPeriodLabel(period);
+      cboArchivePeriod.appendChild(opt);
+    });
+
+    if (currentVal && periodsSet.has(currentVal)) {
+      cboArchivePeriod.value = currentVal;
+    }
+  }
+
+  function formatPeriodLabel(period) {
+    if (period && period.length === 6) {
+      const y = period.slice(0, 4);
+      const m = period.slice(4, 6);
+      const meses = ['', 'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Set', 'Oct', 'Nov', 'Dic'];
+      const mNum = parseInt(m, 10);
+      if (mNum >= 1 && mNum <= 12) {
+        return `${meses[mNum]}-${y} (${period})`;
+      }
+    }
+    return period || '-';
+  }
+
+  function renderArchivePeriodCards() {
+    if (!archivePeriodsGrid) return;
+    const periods = archiveTree?.periods || [];
+    if (!periods.length) {
+      archivePeriodsGrid.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; color: var(--notion-text-subtle); padding: 48px 24px;">
+          <div style="font-size: 2.2rem; margin-bottom: 12px;">📂</div>
+          <strong style="font-size: 1rem; color: var(--notion-text);">No se encontraron descargas organizadas por período.</strong>
+          <p style="margin-top: 8px; font-size: 0.85rem; color: var(--notion-text-muted);">
+            Las descargas de XML, CDR y PDF realizadas desde las propuestas SIRE aparecerán agrupadas por período en esta sección.
+          </p>
+        </div>
+      `;
+      return;
+    }
+
+    archivePeriodsGrid.innerHTML = periods.map((p) => {
+      const isCompras = (p.book || '').toLowerCase().includes('comp');
+      const bookBadge = isCompras
+        ? '<span class="notion-tag notion-tag-gray">Compras (RCE)</span>'
+        : '<span class="notion-tag notion-tag-gray">Ventas (RVIE)</span>';
+
+      const xmlItem = `<span class="archive-metric-item ${p.xml_count === 0 ? 'empty' : ''}"><strong>${p.xml_count.toLocaleString()}</strong> XML</span>`;
+      const cdrItem = `<span class="archive-metric-item ${p.cdr_count === 0 ? 'empty' : ''}"><strong>${p.cdr_count.toLocaleString()}</strong> CDR</span>`;
+      const pdfItem = `<span class="archive-metric-item ${p.pdf_count === 0 ? 'empty' : ''}"><strong>${p.pdf_count.toLocaleString()}</strong> PDF</span>`;
+
+      const sizeStr = formatBytes(p.total_bytes);
+      const encodedFolder = encodeURIComponent(p.path);
+
+      return `
+        <div class="archive-period-row">
+          <div class="archive-period-col-main">
+            <div class="archive-period-header-line">
+              <span class="archive-period-title">${escapeHtml(p.period_label || p.period)}</span>
+              ${bookBadge}
+            </div>
+            <div class="archive-period-company" title="${escapeHtml(p.company_ruc)} - ${escapeHtml(p.company_name)}">
+              <code>${escapeHtml(p.company_ruc)}</code> · ${escapeHtml(p.company_name)}
+            </div>
+          </div>
+
+          <div class="archive-period-col-metrics">
+            <div class="archive-period-metric-group">
+              ${xmlItem}
+              ${cdrItem}
+              ${pdfItem}
+            </div>
+            <div class="archive-period-total-info">
+              Total: <strong>${p.total_files.toLocaleString()}</strong> archivos · ${sizeStr}
+            </div>
+          </div>
+
+          <div class="archive-period-actions">
+            <button type="button" class="btn btn-secondary btn-sm" data-period-action="view" data-company="${escapeHtml(p.company_folder)}" data-book="${escapeHtml(p.book)}" data-period="${escapeHtml(p.period)}" title="Ver comprobantes individuales de este período">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <span>Ver Comprobantes</span>
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" data-period-action="folder" data-folder="${encodedFolder}" title="Abrir carpeta en el Explorador de Windows">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+              <span>Abrir carpeta</span>
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" data-period-action="zip" data-company="${escapeHtml(p.company_folder)}" data-book="${escapeHtml(p.book)}" data-period="${escapeHtml(p.period)}" title="Descargar ZIP de este período">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              <span>ZIP</span>
+            </button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function handleArchivePeriodClick(e) {
+    const btn = e.target.closest('[data-period-action]');
+    if (!btn) return;
+    const action = btn.dataset.periodAction;
+
+    if (action === 'view') {
+      const comp = btn.dataset.company || '';
+      const book = btn.dataset.book || '';
+      const period = btn.dataset.period || '';
+      if (cboArchiveCompany && comp) cboArchiveCompany.value = comp;
+      if (cboArchiveBook && book) cboArchiveBook.value = book;
+      populateArchivePeriods();
+      if (cboArchivePeriod && period) cboArchivePeriod.value = period;
+      archiveCurrentPage = 1;
+      switchArchiveTab('vouchers');
+    } else if (action === 'folder') {
+      const folder = decodeURIComponent(btn.dataset.folder || '');
+      openArchiveFolder(folder);
+    } else if (action === 'zip') {
+      const comp = btn.dataset.company || '';
+      const book = btn.dataset.book || '';
+      const period = btn.dataset.period || '';
+      const params = new URLSearchParams({ company: comp, book, period });
+      window.location.href = `/api/archive/zip?${params.toString()}`;
+    }
+  }
+
+  async function loadArchiveFiles() {
+    if (!archiveTableBody) return;
+
+    archiveTableBody.innerHTML = `
+      <tr>
+        <td colspan="10" style="text-align: center; color: var(--notion-text-subtle); padding: 32px;">
+          <span class="spinner" style="display:inline-block; margin-right:8px;"></span> Consultando archivador digital...
+        </td>
+      </tr>
+    `;
+
+    const company = cboArchiveCompany?.value || '';
+    const book = cboArchiveBook?.value || '';
+    const period = cboArchivePeriod?.value || '';
+    const format = cboArchiveFormat?.value || 'TODOS';
+    const search = txtArchiveSearch?.value.trim() || '';
+
+    const params = new URLSearchParams({
+      company,
+      book,
+      period,
+      format,
+      search,
+      page: String(archiveCurrentPage),
+      page_size: String(archivePageSize)
+    });
+
+    try {
+      const res = await apiFetch(`/api/archive/files?${params.toString()}`);
+      const data = await readArchiveJSON(res, 'No se pudieron listar los comprobantes');
+      if (!data.success) {
+        throw new Error(data.error || 'Error al listar comprobantes');
+      }
+
+      // Actualizar contadores
+      if (data.summary) {
+        if (archiveStatTotal) archiveStatTotal.textContent = (data.summary.total_files || 0).toLocaleString();
+        if (archiveStatXml) archiveStatXml.textContent = (data.summary.xml_count || 0).toLocaleString();
+        if (archiveStatCdr) archiveStatCdr.textContent = (data.summary.cdr_count || 0).toLocaleString();
+        if (archiveStatPdf) archiveStatPdf.textContent = (data.summary.pdf_count || 0).toLocaleString();
+        if (archiveStatSize) archiveStatSize.textContent = formatBytes(data.summary.total_bytes || 0);
+      }
+
+      archiveTotalPages = data.total_pages || 1;
+      const count = data.total_vouchers || data.total || 0;
+      const shownCount = (data.vouchers && data.vouchers.length) || (data.files && data.files.length) || 0;
+      if (archiveFileCountLabel) {
+        archiveFileCountLabel.textContent = `${count.toLocaleString()} comprobante(s) encontrado(s) (${shownCount} en pág. ${data.page})`;
+      }
+      if (archivePageIndicator) {
+        archivePageIndicator.textContent = `Pág. ${data.page} / ${archiveTotalPages}`;
+      }
+      if (btnArchivePrevPage) btnArchivePrevPage.disabled = data.page <= 1;
+      if (btnArchiveNextPage) btnArchiveNextPage.disabled = data.page >= archiveTotalPages;
+
+      if ((!data.vouchers || data.vouchers.length === 0) && (!data.files || data.files.length === 0)) {
+        archiveTableBody.innerHTML = `
+          <tr>
+            <td colspan="10" style="text-align: center; color: var(--notion-text-subtle); padding: 36px;">
+              No se encontraron comprobantes con los filtros seleccionados en este almacenamiento local.
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      if (data.vouchers && data.vouchers.length > 0) {
+        renderArchiveVoucherRows(data.vouchers, (data.page - 1) * data.page_size);
+      } else {
+        renderArchiveFileRows(data.files, (data.page - 1) * data.page_size);
+      }
+    } catch (err) {
+      archiveTableBody.innerHTML = `
+        <tr>
+          <td colspan="10" style="text-align: center; color: var(--tag-red-text); padding: 32px;">
+            Error consultando archivos: ${escapeHtml(err.message)}
+          </td>
+        </tr>
+      `;
+    }
+  }
+
+  function renderArchiveVoucherRows(vouchers, startIndex = 0) {
+    const rows = vouchers.map((v, idx) => {
+      const itemNum = startIndex + idx + 1;
+      const compLabel = (v.serie && v.numero) ? `${escapeHtml(v.serie)}-${escapeHtml(v.numero)}` : escapeHtml(v.key || '—');
+      const rucLabel = v.ruc || '—';
+      const tipoLabel = v.tipo_nombre || (v.tipo === '01' ? 'Factura' : (v.tipo === '03' ? 'Boleta' : (v.tipo === '07' ? 'Nota Crédito' : (v.tipo === '08' ? 'Nota Débito' : `Tipo ${v.tipo}`))));
+
+      let bookBadge = '';
+      if (v.book && v.book.toLowerCase().includes('comp')) {
+        bookBadge = '<span class="notion-tag notion-tag-yellow">Compras</span>';
+      } else if (v.book && v.book.toLowerCase().includes('vent')) {
+        bookBadge = '<span class="notion-tag notion-tag-orange">Ventas</span>';
+      } else {
+        bookBadge = `<span class="notion-tag notion-tag-gray">${escapeHtml(v.book || '—')}</span>`;
+      }
+
+      // XML
+      let xmlCell = '<span class="archive-artifact-empty">—</span>';
+      if (v.has_xml && v.xml_file) {
+        const encXmlPath = encodeURIComponent(v.xml_file.path);
+        xmlCell = `<button type="button" class="archive-artifact-btn xml" data-archive-action="view" data-view-path="${encXmlPath}" data-view-type="XML" title="Visualizar XML UBL (${formatBytes(v.xml_file.size)})">✓ XML</button>`;
+      }
+
+      // CDR
+      let cdrCell = '<span class="archive-artifact-empty">—</span>';
+      if (v.has_cdr && v.cdr_file) {
+        const encCdrPath = encodeURIComponent(v.cdr_file.path);
+        cdrCell = `<button type="button" class="archive-artifact-btn cdr" data-archive-action="view" data-view-path="${encCdrPath}" data-view-type="CDR" title="Visualizar CDR SUNAT (${formatBytes(v.cdr_file.size)})">✓ CDR</button>`;
+      } else if (String(v.serie || '').toUpperCase().startsWith('E')) {
+        cdrCell = '<span class="artifact-badge-na" title="Comprobantes de serie E no tienen CDR">N/A</span>';
+      }
+
+      // PDF
+      let pdfCell = '<span class="archive-artifact-empty">—</span>';
+      if (v.has_pdf && v.pdf_file) {
+        const encPdfPath = encodeURIComponent(v.pdf_file.path);
+        pdfCell = `<button type="button" class="archive-artifact-btn pdf" data-archive-action="view" data-view-path="${encPdfPath}" data-view-type="PDF" title="Visualizar PDF (${formatBytes(v.pdf_file.size)})">✓ PDF</button>`;
+      }
+
+      const anyPath = v.xml_file?.path || v.cdr_file?.path || v.pdf_file?.path || '';
+      const encFolder = encodeURIComponent(anyPath);
+
+      return `
+        <tr>
+          <td style="text-align: center; font-variant-numeric: tabular-nums; color: var(--notion-text-subtle);">${itemNum}</td>
+          <td><span style="font-weight: 500;">${escapeHtml(tipoLabel)}</span></td>
+          <td><strong>${compLabel}</strong></td>
+          <td><span class="font-mono">${escapeHtml(rucLabel)}</span></td>
+          <td>${bookBadge}</td>
+          <td><span class="font-mono">${escapeHtml(formatPeriodLabel(v.period))}</span></td>
+          <td style="text-align: center;">${xmlCell}</td>
+          <td style="text-align: center;">${cdrCell}</td>
+          <td style="text-align: center;">${pdfCell}</td>
+          <td style="text-align: center;">
+            <button type="button" class="btn-icon-action" data-archive-action="open-folder" data-folder-path="${encFolder}" title="Abrir carpeta en Explorador">📂</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    archiveTableBody.innerHTML = rows;
+  }
+
+  function renderArchiveFileRows(files, startIndex = 0) {
+    const rows = files.map((file, idx) => {
+      const itemNum = startIndex + idx + 1;
+      const compLabel = (file.serie && file.numero) ? `${escapeHtml(file.serie)}-${escapeHtml(file.numero)}` : escapeHtml(file.name);
+      const rucLabel = file.ruc || '-';
+      const tipoLabel = file.tipo_nombre || 'Comprobante';
+
+      let bookBadge = '';
+      if (file.book && file.book.toLowerCase().includes('comp')) {
+        bookBadge = '<span class="notion-tag notion-tag-yellow">Compras</span>';
+      } else if (file.book && file.book.toLowerCase().includes('vent')) {
+        bookBadge = '<span class="notion-tag notion-tag-orange">Ventas</span>';
+      } else {
+        bookBadge = `<span class="notion-tag notion-tag-gray">${escapeHtml(file.book || '-')}</span>`;
+      }
+
+      const encodedPath = encodeURIComponent(file.path);
+      let xmlCell = '<span class="archive-artifact-empty">—</span>';
+      let cdrCell = '<span class="archive-artifact-empty">—</span>';
+      let pdfCell = '<span class="archive-artifact-empty">—</span>';
+
+      if (file.format === 'XML') {
+        xmlCell = `<button type="button" class="archive-artifact-btn xml" data-archive-action="view" data-view-path="${encodedPath}" data-view-type="XML">✓ XML</button>`;
+      } else if (file.format === 'CDR') {
+        cdrCell = `<button type="button" class="archive-artifact-btn cdr" data-archive-action="view" data-view-path="${encodedPath}" data-view-type="CDR">✓ CDR</button>`;
+      } else if (file.format === 'PDF') {
+        pdfCell = `<button type="button" class="archive-artifact-btn pdf" data-archive-action="view" data-view-path="${encodedPath}" data-view-type="PDF">✓ PDF</button>`;
+      }
+
+      return `
+        <tr>
+          <td style="text-align: center; font-variant-numeric: tabular-nums; color: var(--notion-text-subtle);">${itemNum}</td>
+          <td><span style="font-weight: 500;">${escapeHtml(tipoLabel)}</span></td>
+          <td><strong>${compLabel}</strong></td>
+          <td><span class="font-mono">${escapeHtml(rucLabel)}</span></td>
+          <td>${bookBadge}</td>
+          <td><span class="font-mono">${escapeHtml(formatPeriodLabel(file.period))}</span></td>
+          <td style="text-align: center;">${xmlCell}</td>
+          <td style="text-align: center;">${cdrCell}</td>
+          <td style="text-align: center;">${pdfCell}</td>
+          <td style="text-align: center;">
+            <button type="button" class="btn-icon-action" data-archive-action="open-folder" data-folder-path="${encodedPath}" title="Abrir carpeta en Explorador">📂</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    archiveTableBody.innerHTML = rows;
+  }
+
+  function handleArchiveTableClick(event) {
+    const btn = event.target.closest('[data-archive-action]');
+    if (!btn) return;
+    const action = btn.dataset.archiveAction;
+
+    if (action === 'view') {
+      const viewPath = btn.dataset.viewPath;
+      const type = String(btn.dataset.viewType || '').toUpperCase();
+      if (type === 'XML' || type === 'CDR') {
+        openXMLViewer(viewPath, type);
+      } else {
+        resetFileViewer();
+        $('fileViewerTitle').textContent = `Visor ${type || 'de archivo'}`;
+        $('fileViewerFrame').src = `/api/files/view?path=${viewPath}`;
+        $('fileViewerFrame').hidden = false;
+        $('fileViewer').showModal();
+      }
+    } else if (action === 'download') {
+      const filePath = btn.dataset.filePath;
+      window.location.href = `/api/files/view?download=1&path=${filePath}`;
+    } else if (action === 'open-folder') {
+      const folderPath = decodeURIComponent(btn.dataset.folderPath || '');
+      openArchiveFolder(folderPath);
+    }
+  }
+
+  async function openArchiveFolder(customPath = '') {
+    let url = '/api/archive/open';
+    let target = customPath;
+    if (!target) {
+      const comp = cboArchiveCompany?.value || '';
+      const book = cboArchiveBook?.value || '';
+      const period = cboArchivePeriod?.value || '';
+      if (comp) {
+        target = 'APP DESCARGAS/CPE/' + comp;
+        if (book) {
+          target += '/' + book;
+          if (period) target += '/' + period;
+        }
+      }
+    }
+    if (target) {
+      url += '?path=' + encodeURIComponent(target);
+    }
+    try {
+      const res = await apiFetch(url, { method: 'POST' });
+      const data = await readArchiveJSON(res, 'No se pudo abrir la carpeta');
+      if (data.success) {
+        showToast('Carpeta abierta en el Explorador de Windows', 'success');
+      } else {
+        throw new Error(data.error || 'No se pudo abrir la carpeta');
+      }
+    } catch (err) {
+      notifyError('Error abriendo carpeta', err.message);
+    }
+  }
+
+  function exportArchiveZip() {
+    const comp = cboArchiveCompany?.value || '';
+    const book = cboArchiveBook?.value || '';
+    const period = cboArchivePeriod?.value || '';
+    if (!comp && !period) {
+      notifyWarning('Exportación ZIP', 'Selecciona al menos una empresa o un período para empaquetar el ZIP del archivador.');
+      return;
+    }
+    const params = new URLSearchParams({
+      company: comp,
+      book,
+      period
+    });
+    window.location.href = `/api/archive/zip?${params.toString()}`;
+  }
+
+  function formatBytes(bytes, decimals = 1) {
+    if (!bytes || bytes === 0) return '0 B';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
   }
 
   // Monitoreo de actividad de la ventana (Heartbeat y Shutdown)

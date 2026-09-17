@@ -624,16 +624,6 @@ func (e *DownloadEngine) runStage(
 		}
 		return results
 	}
-	if tipo == sunat.DescargaPDF && !consultacpeAllowed {
-		attempts := make([]attemptResult, 0, len(comps))
-		for _, comp := range comps {
-			attempts = append(
-				attempts,
-				failedAttempt(comp, tipo, errors.New("consultacpe no autorizado")),
-			)
-		}
-		return attemptItems(e.generateFailedPDFs(ctx, job, attempts, false))
-	}
 
 	var attempts []attemptResult
 	if tipo == sunat.DescargaXML {
@@ -726,14 +716,6 @@ func (e *DownloadEngine) processXMLWaves(
 		}
 	}
 	return attempts
-}
-
-func attemptItems(attempts []attemptResult) []sunat.ItemResult {
-	items := make([]sunat.ItemResult, 0, len(attempts))
-	for _, attempt := range attempts {
-		items = append(items, attempt.item)
-	}
-	return items
 }
 
 func (e *DownloadEngine) processStage(
@@ -986,6 +968,17 @@ func (e *DownloadEngine) generatePDFFromXML(
 	xmlData, err := os.ReadFile(xmlPath)
 	if err != nil {
 		return failedAttempt(comp, sunat.DescargaPDF, fmt.Errorf("leyendo XML local: %w", err))
+	}
+	if sunat.IsZipContent(xmlData) {
+		_, extractedXML, extractErr := sunat.ExtractFileFromZip(xmlData, ".xml")
+		if extractErr != nil {
+			return failedAttempt(
+				comp,
+				sunat.DescargaPDF,
+				fmt.Errorf("extrayendo XML local del ZIP: %w", extractErr),
+			)
+		}
+		xmlData = extractedXML
 	}
 	pdfData, err := pdfgen.FromUBL(xmlData)
 	if err != nil {

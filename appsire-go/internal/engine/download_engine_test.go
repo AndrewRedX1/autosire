@@ -28,6 +28,7 @@ type recordingClient struct {
 	blockXML             bool
 	fallbackXML          int
 	pdfDownloads         int
+	pdfErr               error
 	cdrDownloads         int
 	descriptionDownloads int
 	transportResets      int
@@ -41,11 +42,75 @@ func (c *recordingClient) DownloadPDF(
 	c.record(sunat.DescargaPDF)
 	c.mu.Lock()
 	c.pdfDownloads++
+	err := c.pdfErr
 	c.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	return &sunat.DownloadedFile{
 		FileName: "documento.pdf",
 		Content:  []byte("%PDF-1.4\n%%EOF"),
 	}, nil
+}
+
+func TestDownloadItemFallsBackToLocalZippedXMLWhenSUNATLacksPDF(t *testing.T) {
+	t.Parallel()
+
+	client := &recordingClient{pdfErr: &sunat.HTTPStatusError{
+		StatusCode: 422,
+		Body:       `{"codError":"301","desError":"No se encontro el PDF"}`,
+	}}
+	manager := filemanager.NewFileManager(t.TempDir())
+	comp := sunat.Comprobante{
+		RUC: "20111111111", Tipo: "01", Serie: "F001", Numero: "15", Libro: "2",
+		Periodo: "202609", EmpresaRUC: "20999999999", EmpresaRazon: "Empresa de prueba",
+	}
+
+	var archive bytes.Buffer
+	zipWriter := zip.NewWriter(&archive)
+	entry, err := zipWriter.Create("20111111111-01-F001-15.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := entry.Write(xmlFile(comp).Content); err != nil {
+		t.Fatal(err)
+	}
+	if err := zipWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.SaveDownloadedFile(comp, &sunat.DownloadedFile{
+		FileName: "20111111111-01-F001-15.zip",
+		Content:  archive.Bytes(),
+		IsZip:    true,
+	}, sunat.DescargaXML); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := NewDownloadEngine(client, manager).DownloadItem(
+		t.Context(),
+		comp,
+		sunat.DescargaPDF,
+	)
+	if err != nil {
+		t.Fatalf("DownloadItem() error = %v", err)
+	}
+	if result.Origen != "generado desde XML" || !strings.HasSuffix(strings.ToLower(result.RutaLocal), ".pdf") {
+		t.Fatalf("resultado = %#v", result)
+	}
+	content, err := os.ReadFile(result.RutaLocal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(content, []byte("%PDF-")) {
+		t.Fatalf("el fallback no guardó un PDF válido")
+	}
+	client.mu.Lock()
+	pdfDownloads := client.pdfDownloads
+	xmlDownloads := client.primaryXML + client.fallbackXML
+	client.mu.Unlock()
+	if pdfDownloads != 1 || xmlDownloads != 0 {
+		t.Fatalf("consultas PDF/XML = %d/%d, want 1/0", pdfDownloads, xmlDownloads)
+	}
 }
 
 func (c *recordingClient) DownloadXML(

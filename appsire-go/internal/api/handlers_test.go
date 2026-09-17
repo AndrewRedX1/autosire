@@ -2,6 +2,7 @@ package api
 
 import (
 	"archive/zip"
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,6 +15,56 @@ import (
 	"appsire-go/internal/filemanager"
 	"appsire-go/internal/sunat"
 )
+
+func TestSecurityHeadersAllowSameOriginFileViewer(t *testing.T) {
+	t.Parallel()
+
+	handler := SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if got := response.Header().Get("X-Frame-Options"); got != "SAMEORIGIN" {
+		t.Fatalf("X-Frame-Options = %q, want SAMEORIGIN", got)
+	}
+	if policy := response.Header().Get("Content-Security-Policy"); !strings.Contains(policy, "frame-src 'self'") {
+		t.Fatalf("Content-Security-Policy no permite el visor del mismo origen: %q", policy)
+	}
+}
+
+func TestHandleViewFileServesPDFInline(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	pdfPath := filepath.Join(baseDir, "representacion impresa.pdf")
+	pdfData := []byte("%PDF-1.4\n%%EOF\n")
+	if err := os.WriteFile(pdfPath, pdfData, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	server := &Server{fileManager: filemanager.NewFileManager(baseDir)}
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/files/view?path="+url.QueryEscape(pdfPath),
+		nil,
+	)
+	response := httptest.NewRecorder()
+	server.HandleViewFile(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if got := response.Header().Get("Content-Type"); got != "application/pdf" {
+		t.Fatalf("Content-Type = %q, want application/pdf", got)
+	}
+	if disposition := response.Header().Get("Content-Disposition"); !strings.HasPrefix(disposition, "inline;") {
+		t.Fatalf("Content-Disposition = %q, want inline", disposition)
+	}
+	if !bytes.Equal(response.Body.Bytes(), pdfData) {
+		t.Fatalf("contenido PDF servido fue alterado")
+	}
+}
 
 func TestValidateProposalBindingRejectsChangedIdentity(t *testing.T) {
 	t.Parallel()
@@ -131,4 +182,67 @@ func withProposalPeriod(request engine.DownloadRequest, period string) engine.Do
 func withProposalTicket(request engine.DownloadRequest, ticket string) engine.DownloadRequest {
 	request.ProposalTicket = ticket
 	return request
+}
+
+func TestArchiveHandlers(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	// Período 1: Compras 202602 (XML + CDR)
+	compDir1 := filepath.Join(baseDir, "APP DESCARGAS", "CPE", "20490304101 HOTELES CBC S.A.C", "Compras", "202602")
+	if err := os.MkdirAll(compDir1, 0755); err != nil {
+		t.Fatal(err)
+	}
+	xmlPath1 := filepath.Join(compDir1, "10238508903-01-FF02-61781.xml")
+	if err := os.WriteFile(xmlPath1, []byte("<xml>test</xml>"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cdrPath1 := filepath.Join(compDir1, "R-10238508903-01-FF02-61781.xml")
+	if err := os.WriteFile(cdrPath1, []byte("<cdr>ok</cdr>"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Período 2: Compras 202606 (PDF)
+	compDir2 := filepath.Join(baseDir, "APP DESCARGAS", "CPE", "20490304101 HOTELES CBC S.A.C", "Compras", "202606")
+	if err := os.MkdirAll(compDir2, 0755); err != nil {
+		t.Fatal(err)
+	}
+	pdfPath2 := filepath.Join(compDir2, "10238508903-01-FF02-61781.pdf")
+	if err := os.WriteFile(pdfPath2, []byte("%PDF-1.4\n%%EOF"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := &Server{fileManager: filemanager.NewFileManager(baseDir)}
+
+	// Test HandleArchiveTree
+	reqTree := httptest.NewRequest(http.MethodGet, "/api/archive/tree", nil)
+	wTree := httptest.NewRecorder()
+	server.HandleArchiveTree(wTree, reqTree)
+
+	if wTree.Code != http.StatusOK {
+		t.Fatalf("tree status = %d, body = %s", wTree.Code, wTree.Body.String())
+	}
+	treeBody := wTree.Body.String()
+	if !strings.Contains(treeBody, "20490304101") || !strings.Contains(treeBody, "Compras") {
+		t.Fatalf("tree body missing expected data: %s", treeBody)
+	}
+	if !strings.Contains(treeBody, "periods") || !strings.Contains(treeBody, "Feb-2026") || !strings.Contains(treeBody, "Jun-2026") {
+		t.Fatalf("tree body missing period items or labels: %s", treeBody)
+	}
+
+	// Test HandleArchiveFiles consolidates into vouchers with XML and CDR
+	reqFiles := httptest.NewRequest(http.MethodGet, "/api/archive/files?company=20490304101&book=Compras&period=202602", nil)
+	wFiles := httptest.NewRecorder()
+	server.HandleArchiveFiles(wFiles, reqFiles)
+
+	if wFiles.Code != http.StatusOK {
+		t.Fatalf("files status = %d, body = %s", wFiles.Code, wFiles.Body.String())
+	}
+	filesBody := wFiles.Body.String()
+	if !strings.Contains(filesBody, "FF02-61781") || !strings.Contains(filesBody, "Factura") {
+		t.Fatalf("files body missing expected voucher data: %s", filesBody)
+	}
+	if !strings.Contains(filesBody, `"has_xml":true`) || !strings.Contains(filesBody, `"has_cdr":true`) {
+		t.Fatalf("files body missing consolidated voucher flags: %s", filesBody)
+	}
 }

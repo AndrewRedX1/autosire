@@ -2209,6 +2209,33 @@ input::placeholder {
 .notion-tag-gray   { background: var(--tag-gray-bg); color: var(--tag-gray-text); }
 .notion-tag-red    { background: var(--tag-red-bg); color: var(--tag-red-text); }
 .notion-tag-blue   { background: var(--tag-blue-bg); color: var(--tag-blue-text); }
+.notion-tag-purple { background: var(--tag-purple-bg); color: var(--tag-purple-text); }
+.notion-tag-orange { background: var(--tag-orange-bg); color: var(--tag-orange-text); }
+
+.archive-row-actions {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-icon-action {
+  background: transparent;
+  border: 1px solid var(--notion-border);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+  line-height: 1;
+}
+
+.btn-icon-action:hover {
+  background: var(--notion-bg-hover);
+  border-color: var(--notion-border-strong);
+  transform: translateY(-1px);
+}
+
 
 /* Resumen pie de tabla Notion */
 .notion-db-foot {
@@ -2736,6 +2763,86 @@ input::placeholder {
   line-height: 1;
 }
 
+/* Dropdown de Validaciones (Minimalist Notion Style) */
+.dropdown-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.dropdown-wrap .dropdown-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.dropdown-wrap .dropdown-chevron {
+  transition: transform 150ms ease;
+  margin-left: 2px;
+  opacity: 0.7;
+}
+
+.dropdown-wrap.open .dropdown-chevron {
+  transform: rotate(180deg);
+}
+
+.dropdown-wrap .dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 100;
+  min-width: 195px;
+  background: var(--notion-bg-card);
+  border: 1px solid var(--notion-border-strong);
+  border-radius: var(--radius-md, 6px);
+  box-shadow: var(--shadow-popover, 0 4px 16px rgba(15, 15, 15, 0.1));
+  padding: 4px;
+  display: none;
+  flex-direction: column;
+  gap: 1px;
+  animation: fadeIn 120ms ease;
+}
+
+.dropdown-wrap.open .dropdown-menu {
+  display: flex;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm, 4px);
+  color: var(--notion-text);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+  white-space: nowrap;
+}
+
+.dropdown-item:hover {
+  background: var(--notion-bg-hover);
+  color: var(--notion-text);
+}
+
+.dropdown-item .item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--notion-text-muted);
+  flex-shrink: 0;
+}
+
+.dropdown-item:hover .item-icon {
+  color: var(--notion-text);
+}
+
 /* Columna N° compacta */
 .notion-proposal-table thead th:first-child,
 .notion-proposal-table tbody td:first-child {
@@ -2870,3 +2977,197 @@ input::placeholder {
     grid-template-columns: 1fr;
   }
 }
+
+/* ==========================================================================
+   Archivador Digital — Estilos de Períodos (Cards Anchos Tipo Tabla)
+   ========================================================================== */
+
+.archive-tab-pane {
+  animation: fadeIn 150ms ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.archive-periods-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.archive-period-row {
+  background: var(--notion-bg-card);
+  border: 1px solid var(--notion-border);
+  border-radius: var(--radius-md);
+  padding: 12px 18px;
+  display: grid;
+  grid-template-columns: minmax(240px, 1.4fr) minmax(280px, 1.8fr) auto;
+  align-items: center;
+  gap: 16px;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+}
+
+.archive-period-row:hover {
+  border-color: var(--notion-border-strong);
+  background: var(--notion-bg-hover);
+  box-shadow: var(--shadow-card);
+}
+
+.archive-period-col-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.archive-period-header-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.archive-period-title {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--notion-text);
+  letter-spacing: -0.01em;
+}
+
+.archive-period-company {
+  font-size: 0.8rem;
+  color: var(--notion-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-period-col-metrics {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.archive-period-metric-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.archive-metric-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 0.76rem;
+  font-weight: 500;
+  background: var(--notion-bg-subtle);
+  color: var(--notion-text-muted);
+  border: 1px solid var(--notion-border);
+}
+
+.archive-metric-item strong {
+  color: var(--notion-text);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+
+.archive-metric-item.empty {
+  opacity: 0.38;
+  border-style: dashed;
+}
+
+.archive-period-total-info {
+  font-size: 0.78rem;
+  color: var(--notion-text-subtle);
+  white-space: nowrap;
+}
+
+.archive-period-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.archive-period-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  padding: 5px 11px;
+  white-space: nowrap;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+}
+
+.archive-period-actions .btn svg {
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.archive-period-actions .btn:hover svg {
+  opacity: 1;
+}
+
+@media (max-width: 960px) {
+  .archive-period-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .archive-period-actions {
+    justify-content: flex-start;
+  }
+}
+
+/* Botones de artefactos en tabla de comprobantes (XML, CDR, PDF) */
+.archive-artifact-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  line-height: 1.2;
+  transition: transform 120ms ease, opacity 120ms ease, filter 120ms ease;
+  white-space: nowrap;
+}
+
+.archive-artifact-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(0.95);
+}
+
+.archive-artifact-btn.xml {
+  background: var(--tag-green-bg);
+  color: var(--tag-green-text);
+  border-color: rgba(59, 110, 76, 0.25);
+}
+
+.archive-artifact-btn.cdr {
+  background: var(--tag-purple-bg);
+  color: var(--tag-purple-text);
+  border-color: rgba(105, 64, 133, 0.25);
+}
+
+.archive-artifact-btn.pdf {
+  background: var(--tag-blue-bg);
+  color: var(--tag-blue-text);
+  border-color: rgba(43, 93, 132, 0.25);
+}
+
+.archive-artifact-empty {
+  color: var(--notion-text-subtle);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
