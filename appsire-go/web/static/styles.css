@@ -2249,21 +2249,21 @@ input::placeholder {
   color: var(--notion-text-subtle);
 }
 
-/* Modal Dialog Notion */
+/* Modal Dialog Notion (Centrado Matemático Universal en Top Layer) */
 .modal-dialog {
   border: 1px solid var(--notion-border-strong);
   border-radius: var(--radius-lg);
   padding: 0;
   max-width: 520px;
-  width: 92vw;
+  width: min(520px, calc(100vw - 32px));
   box-shadow: var(--shadow-popover);
   background: var(--notion-bg-card);
   color: var(--notion-text);
   position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  margin: 0;
+  inset: 0;
+  margin: auto;
+  overflow: hidden;
+  max-height: 90vh;
 }
 
 .modal-dialog::backdrop {
@@ -2362,6 +2362,29 @@ input::placeholder {
   gap: 12px;
 }
 
+.form-section-divider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 2px 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--notion-border);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--notion-text);
+  letter-spacing: -0.01em;
+}
+
+#modalEmpresa {
+  max-width: 540px;
+}
+
+#modalEmpresa .modal-body {
+  max-height: calc(88vh - 65px);
+  overflow-y: auto;
+  padding: 16px 20px 20px 20px;
+}
+
 .modal-footer {
   display: flex;
   justify-content: flex-end;
@@ -2445,15 +2468,53 @@ input::placeholder {
 }
 
 /* ==========================================================================
-   Notion SweetAlert Modal (Diálogos Centrados Modernos y Elegantes)
+   Notion SweetAlert Modal (Diálogos Centrados en Top Layer / Encima de Todo)
    ========================================================================== */
+
+dialog.notion-swal-dialog {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: auto;
+  position: fixed;
+  inset: 0;
+  max-width: 100vw;
+  max-height: 100vh;
+  width: fit-content;
+  height: fit-content;
+  overflow: visible;
+  outline: none;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+dialog.notion-swal-dialog:modal {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  max-width: 100vw;
+  max-height: 100vh;
+  width: fit-content;
+  height: fit-content;
+  overflow: visible;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+dialog.notion-swal-dialog::backdrop {
+  background: rgba(15, 15, 15, 0.65);
+  backdrop-filter: blur(4px);
+}
 
 .notion-swal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 15, 15, 0.55);
+  background: rgba(15, 15, 15, 0.65);
   backdrop-filter: blur(4px);
-  z-index: 10050;
+  z-index: 2147483647;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2472,20 +2533,23 @@ input::placeholder {
   color: var(--notion-text);
   border: 1px solid var(--notion-border-strong);
   border-radius: 14px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(0, 0, 0, 0.08);
   padding: 32px 28px 26px 28px;
-  width: 90%;
+  width: 90vw;
   max-width: 440px;
   text-align: center;
-  transform: scale(0.9) translateY(12px);
-  transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transform: scale(0.92) translateY(8px);
+  transition: transform 0.22s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.2s ease;
+  opacity: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
 }
 
+dialog.notion-swal-dialog.active .notion-swal-card,
 .notion-swal-overlay.active .notion-swal-card {
   transform: scale(1) translateY(0);
+  opacity: 1;
 }
 
 /* Iconos circulares grandes estilo SweetAlert */
@@ -3170,4 +3234,899 @@ input::placeholder {
   font-size: 0.75rem;
   font-weight: 500;
 }
+
+/* =========================================================
+   Modal de Validación de Tipo de Cambio (T.Cambio)
+   ========================================================= */
+.modal-dialog.modal-xl {
+  max-width: 1040px;
+  width: min(1040px, calc(100vw - 36px));
+}
+
+.modal-content-wide {
+  width: 100%;
+}
+
+.modal-body-scrollable {
+  max-height: calc(85vh - 140px);
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.modal-header-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.modal-header-badge {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  background: var(--notion-bg);
+  border: 1px solid var(--notion-border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.modal-header-badge svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+.modal-subtitle {
+  font-size: 0.8rem;
+  color: var(--notion-text-muted);
+  margin-top: 2px;
+}
+
+/* Toolbar superior con selector de tipo de cambio y métricas */
+.tc-toolbar-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  background: var(--notion-bg);
+  border: 1px solid var(--notion-border);
+  border-radius: var(--radius-md);
+}
+
+.tc-criterio-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tc-criterio-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--notion-text);
+}
+
+.tc-pill-selector {
+  display: inline-flex;
+  align-items: center;
+  background: var(--notion-bg-card);
+  border: 1px solid var(--notion-border-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  gap: 2px;
+}
+
+.tc-pill-opt {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  margin: 0;
+}
+
+.tc-pill-opt input[type="radio"] {
+  display: none;
+}
+
+.tc-pill-opt span {
+  display: inline-block;
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--notion-text-muted);
+  border-radius: 4px;
+  transition: all 120ms ease;
+  user-select: none;
+}
+
+.tc-pill-opt span small {
+  font-size: 0.72rem;
+  opacity: 0.8;
+}
+
+.tc-pill-opt input[type="radio"]:checked + span {
+  background: var(--notion-bg-hover);
+  color: var(--notion-text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(15, 15, 15, 0.06);
+}
+
+/* Métricas del modal */
+.tc-metrics-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tc-metric-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--notion-border);
+  background: var(--notion-bg-card);
+  font-size: 0.78rem;
+}
+
+.tc-metric-num {
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.tc-metric-lbl {
+  color: var(--notion-text-muted);
+}
+
+.tc-metric-ok .tc-metric-num { color: #0f7b3a; }
+.tc-metric-diff .tc-metric-num { color: #b45309; }
+.tc-metric-vacio .tc-metric-num { color: #dc2626; }
+
+/* Barra de acciones y filtros */
+.tc-action-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 2px 0;
+}
+
+.tc-filter-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tc-filter-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--notion-text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Tabla del modal TC */
+.tc-table-wrap {
+  border: 1px solid var(--notion-border);
+  border-radius: var(--radius-md);
+  overflow: auto;
+  max-height: 380px;
+  background: var(--notion-bg-card);
+}
+
+.tc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.tc-table th {
+  position: sticky;
+  top: 0;
+  background: var(--notion-bg);
+  border-bottom: 1px solid var(--notion-border-strong);
+  padding: 8px 10px;
+  font-weight: 600;
+  font-size: 0.76rem;
+  color: var(--notion-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  z-index: 2;
+  white-space: nowrap;
+}
+
+.tc-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--notion-border);
+  color: var(--notion-text);
+  white-space: nowrap;
+}
+
+.tc-table tbody tr:hover {
+  background: var(--notion-bg-hover);
+}
+
+.tc-table tbody tr.row-diff {
+  background: rgba(245, 158, 11, 0.04);
+}
+
+.tc-table tbody tr.row-diff:hover {
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.tc-table tbody tr.row-vacio {
+  background: rgba(239, 68, 68, 0.04);
+}
+
+.tc-badge-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.tc-badge-ok {
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+}
+
+.tc-badge-diff {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+
+.tc-badge-vacio {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+}
+
+.tc-badge-sintc {
+  background: var(--notion-bg);
+  color: var(--notion-text-muted);
+  border: 1px solid var(--notion-border);
+}
+
+.tc-badge-err {
+  background: rgba(239, 68, 68, 0.14);
+  color: #991b1b;
+}
+
+.tc-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--notion-border);
+  background: var(--notion-bg);
+}
+
+.tc-footer-status {
+  font-size: 0.8125rem;
+  color: var(--notion-text-muted);
+}
+
+.tc-footer-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ==========================================================================
+   Validación de CPE (SUNAT Consulta Integrada) — Notion Style
+   ========================================================================== */
+
+.cpe-modal {
+  max-width: 1160px;
+  width: min(1160px, calc(100vw - 36px));
+}
+
+.cpe-top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.cpe-scope-selector {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.cpe-scope-selector .radio-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--notion-text);
+  cursor: pointer;
+}
+
+.cpe-metrics-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cpe-metric-total {
+  border-left: 3px solid #64748b;
+}
+
+.cpe-metric-aceptado {
+  border-left: 3px solid #10b981;
+}
+
+.cpe-metric-aceptado .tc-metric-num {
+  color: #047857;
+}
+
+.cpe-metric-anulado {
+  border-left: 3px solid #f59e0b;
+}
+
+.cpe-metric-anulado .tc-metric-num {
+  color: #b45309;
+}
+
+.cpe-metric-noexiste {
+  border-left: 3px solid #ef4444;
+}
+
+.cpe-metric-noexiste .tc-metric-num {
+  color: #b91c1c;
+}
+
+.cpe-metric-riesgo {
+  border-left: 3px solid #8b5cf6;
+}
+
+.cpe-metric-riesgo .tc-metric-num {
+  color: #6d28d9;
+}
+
+/* Barra de progreso interactiva */
+.cpe-progress-container {
+  margin: 12px 0 6px 0;
+  padding: 10px 14px;
+  background: var(--notion-bg-subtle, #f8f9fa);
+  border: 1px solid var(--notion-border);
+  border-radius: 8px;
+}
+
+.cpe-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--notion-text-muted);
+  margin-bottom: 6px;
+}
+
+.cpe-progress-pct {
+  font-weight: 700;
+  color: var(--notion-primary, #0284c7);
+}
+
+.cpe-progress-bar-wrap {
+  width: 100%;
+  height: 6px;
+  background: var(--notion-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.cpe-progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #0284c7 0%, #38bdf8 100%);
+  border-radius: 3px;
+  transition: width 0.2s ease-out;
+}
+
+/* Filtros y búsqueda */
+.cpe-action-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0;
+  flex-wrap: wrap;
+}
+
+.cpe-filter-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cpe-pill-btn {
+  background: var(--notion-bg);
+  border: 1px solid var(--notion-border);
+  color: var(--notion-text-muted);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cpe-pill-btn:hover {
+  background: var(--notion-bg-hover);
+  color: var(--notion-text);
+}
+
+.cpe-pill-btn.active {
+  background: var(--notion-bg-selected, rgba(2, 132, 199, 0.1));
+  border-color: #0284c7;
+  color: #0284c7;
+  font-weight: 600;
+}
+
+.cpe-pill-risk.active {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: #ef4444;
+  color: #b91c1c;
+}
+
+.cpe-filter-search {
+  flex: 1;
+  max-width: 320px;
+}
+
+/* Tabla CPE */
+.cpe-table th {
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.cpe-table td {
+  font-size: 0.78rem;
+  vertical-align: middle;
+}
+
+.cpe-table td.cpe-comp-num {
+  font-family: var(--font-mono, monospace);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cpe-table td.cpe-ruc {
+  font-family: var(--font-mono, monospace);
+}
+
+/* Badges de Estado CPE */
+.badge-cpe {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.badge-cpe-aceptado,
+.badge-cpe-autorizado {
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+}
+
+.badge-cpe-anulado {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+
+.badge-cpe-noexiste,
+.badge-cpe-noautorizado {
+  background: rgba(239, 68, 68, 0.15);
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.badge-cpe-error {
+  background: rgba(239, 68, 68, 0.12);
+  color: #991b1b;
+}
+
+/* Badges de Estado RUC */
+.badge-ruc {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.badge-ruc-activo {
+  background: rgba(16, 185, 129, 0.1);
+  color: #047857;
+}
+
+.badge-ruc-baja,
+.badge-ruc-suspension,
+.badge-ruc-inhabilitado {
+  background: rgba(168, 85, 247, 0.14);
+  color: #6d28d9;
+  font-weight: 600;
+}
+
+/* Badges de Condición Domicilio */
+.badge-domi {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.badge-domi-habido {
+  background: rgba(16, 185, 129, 0.1);
+  color: #047857;
+}
+
+.badge-domi-nohabido,
+.badge-domi-nohallado {
+  background: rgba(239, 68, 68, 0.14);
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.badge-domi-pendiente {
+  background: rgba(245, 158, 11, 0.14);
+  color: #b45309;
+}
+
+/* Resaltado de fila con riesgo fiscal */
+.row-cpe-risk {
+  background: rgba(239, 68, 68, 0.04) !important;
+}
+
+.row-cpe-risk td:first-child {
+  border-left: 3px solid #ef4444;
+}
+
+/* =========================================================
+   Módulo: Validación SSCO (Sujetos Sin Capacidad Operativa)
+   ========================================================= */
+.ssco-header-badge {
+  background: rgba(239, 68, 68, 0.1) !important;
+}
+
+.ssco-metric-critico {
+  background: rgba(239, 68, 68, 0.1);
+  color: #b91c1c;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.ssco-metric-critico .tc-metric-num {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.ssco-metric-warning {
+  background: rgba(245, 158, 11, 0.1);
+  color: #b45309;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.ssco-metric-warning .tc-metric-num {
+  color: #b45309;
+  font-weight: 700;
+}
+
+.ssco-metric-ok {
+  background: rgba(16, 185, 129, 0.1);
+  color: #047857;
+}
+
+.ssco-metric-ok .tc-metric-num {
+  color: #047857;
+}
+
+.ssco-metric-igv {
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.25);
+}
+
+.ssco-metric-igv .tc-metric-num {
+  color: #991b1b;
+  font-weight: 700;
+}
+
+.ssco-padron-info-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-hover, #f8fafc);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  padding: 8px 14px;
+  margin-bottom: 12px;
+  font-size: 0.8rem;
+}
+
+.ssco-padron-badge {
+  display: inline-block;
+  background: var(--notion-primary, #0284c7);
+  color: #ffffff;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  margin-right: 8px;
+}
+
+.ssco-padron-info-text {
+  color: var(--notion-text, #1e293b);
+  display: flex;
+  align-items: center;
+}
+
+/* Badges de Estado SSCO */
+.ssco-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ssco-badge-critico {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
+  font-weight: 700;
+}
+
+.ssco-badge-warning {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+  font-weight: 600;
+}
+
+.ssco-badge-ok {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+/* Filas con riesgo SSCO */
+.row-ssco-critical {
+  background: rgba(239, 68, 68, 0.08) !important;
+}
+
+.row-ssco-critical td:first-child {
+  border-left: 3px solid #dc2626 !important;
+}
+
+.row-ssco-warning {
+  background: rgba(245, 158, 11, 0.06) !important;
+}
+
+.row-ssco-warning td:first-child {
+  border-left: 3px solid #f59e0b !important;
+}
+
+/* =========================================================
+   Módulo: Cuadre de Importes (SIRE)
+   ========================================================= */
+.cuadre-header-badge {
+  background: rgba(2, 132, 199, 0.1) !important;
+}
+
+.cuadre-toolbar-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.cuadre-global-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cuadre-col-select {
+  min-width: 240px;
+  border-color: var(--notion-border, #e2e8f0);
+  background: var(--notion-bg, #ffffff);
+  font-size: 0.82rem;
+}
+
+.cuadre-metric-descuadres {
+  background: rgba(239, 68, 68, 0.1);
+  color: #b91c1c;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.cuadre-metric-descuadres .tc-metric-num {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.cuadre-metric-neta {
+  background: rgba(2, 132, 199, 0.08);
+  border: 1px solid rgba(2, 132, 199, 0.2);
+}
+
+.cuadre-metric-neta .tc-metric-num {
+  color: var(--notion-primary, #0284c7);
+  font-weight: 700;
+}
+
+.cuadre-metric-exceso {
+  background: rgba(245, 158, 11, 0.08);
+  color: #b45309;
+}
+
+.cuadre-metric-exceso .tc-metric-num {
+  color: #b45309;
+}
+
+.cuadre-metric-defecto {
+  background: rgba(147, 51, 234, 0.08);
+  color: #7e22ce;
+}
+
+.cuadre-metric-defecto .tc-metric-num {
+  color: #7e22ce;
+}
+
+.cuadre-row-select {
+  width: 100%;
+  font-size: 0.78rem;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--notion-border, #cbd5e1);
+  background-color: var(--notion-bg, #ffffff);
+  color: var(--notion-text, #1e293b);
+}
+
+.cuadre-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.cuadre-diff-exceso {
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.cuadre-diff-defecto {
+  background: rgba(239, 68, 68, 0.1);
+  color: #b91c1c;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.cuadre-val-prev {
+  color: var(--notion-text-subtle, #94a3b8);
+  font-size: 0.8rem;
+}
+
+.cuadre-val-next {
+  color: #047857;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+/* =========================================================
+   Módulo: Validación de Correlativos RVIE (SIRE)
+   ========================================================= */
+.correl-header-badge {
+  background: rgba(124, 58, 237, 0.1) !important;
+}
+
+.correl-toolbar-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.correl-filter-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.correl-serie-select {
+  min-width: 170px;
+  border-color: var(--notion-border, #e2e8f0);
+  background: var(--notion-bg, #ffffff);
+  font-size: 0.82rem;
+}
+
+.correl-metric-faltantes {
+  background: rgba(239, 68, 68, 0.1);
+  color: #b91c1c;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.correl-metric-faltantes .tc-metric-num {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.correl-metric-series {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.correl-metric-series .tc-metric-num {
+  color: #b45309;
+  font-weight: 700;
+}
+
+.correl-metric-total-series {
+  background: rgba(124, 58, 237, 0.08);
+  color: #7c3aed;
+}
+
+.correl-metric-total-series .tc-metric-num {
+  color: #7c3aed;
+}
+
+.correl-metric-docs {
+  background: rgba(100, 116, 139, 0.08);
+  color: #475569;
+}
+
+.correl-metric-docs .tc-metric-num {
+  color: #475569;
+}
+
+.correl-badge-anulado {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+  letter-spacing: 0.3px;
+}
+
+
 

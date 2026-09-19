@@ -16,30 +16,36 @@ import (
 
 	"appsire-go/internal/auth"
 	"appsire-go/internal/company"
+	"appsire-go/internal/cpe"
 	"appsire-go/internal/engine"
 	"appsire-go/internal/excel"
+	"appsire-go/internal/exchangerate"
 	"appsire-go/internal/filemanager"
 	"appsire-go/internal/license"
 	"appsire-go/internal/session"
 	"appsire-go/internal/sirepreview"
+	"appsire-go/internal/ssco"
 	"appsire-go/internal/sunat"
 	"appsire-go/internal/xmlpreview"
 )
 
 // Server almacena las dependencias y servicios de la API
 type Server struct {
-	tokenService   *auth.TokenService
-	excelReader    *excel.ExcelReader
-	downloadEngine *engine.DownloadEngine
-	fileManager    *filemanager.FileManager
-	licenseMgr     *license.LicenseManager
-	proposalClient *sunat.ProposalClient
-	companyStore   *company.Store
-	sessionMgr     *session.Manager
-	buildInfo      BuildInfo
-	identityMu     sync.Mutex
-	proposalMu     sync.RWMutex
-	proposals      map[sunat.ProposalBook]proposalBinding
+	tokenService        *auth.TokenService
+	excelReader         *excel.ExcelReader
+	downloadEngine      *engine.DownloadEngine
+	fileManager         *filemanager.FileManager
+	licenseMgr          *license.LicenseManager
+	proposalClient      *sunat.ProposalClient
+	companyStore        *company.Store
+	sessionMgr          *session.Manager
+	exchangeRateService *exchangerate.Service
+	cpeClient           *cpe.Client
+	sscoService         *ssco.Service
+	buildInfo           BuildInfo
+	identityMu          sync.Mutex
+	proposalMu          sync.RWMutex
+	proposals           map[sunat.ProposalBook]proposalBinding
 }
 
 type BuildInfo struct {
@@ -78,6 +84,19 @@ func NewServer(
 		proposals:      make(map[sunat.ProposalBook]proposalBinding),
 	}
 }
+
+func (s *Server) SetExchangeRateService(svc *exchangerate.Service) {
+	s.exchangeRateService = svc
+}
+
+func (s *Server) SetCPEClient(client *cpe.Client) {
+	s.cpeClient = client
+}
+
+func (s *Server) SetSSCOService(svc *ssco.Service) {
+	s.sscoService = svc
+}
+
 
 // HandleAppInfo permite identificar el binario que está atendiendo al frontend.
 func (s *Server) HandleAppInfo(w http.ResponseWriter, r *http.Request) {

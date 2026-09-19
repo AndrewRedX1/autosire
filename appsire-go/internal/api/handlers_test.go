@@ -13,6 +13,7 @@ import (
 
 	"appsire-go/internal/engine"
 	"appsire-go/internal/filemanager"
+	"appsire-go/internal/ssco"
 	"appsire-go/internal/sunat"
 )
 
@@ -246,3 +247,163 @@ func TestArchiveHandlers(t *testing.T) {
 		t.Fatalf("files body missing consolidated voucher flags: %s", filesBody)
 	}
 }
+
+func TestHandleValidateTC(t *testing.T) {
+	t.Parallel()
+
+	server := &Server{}
+	body := bytes.NewBufferString(`{
+		"book": "RCE",
+		"tc_type": "Venta",
+		"items": [
+			{
+				"comp_pago": "01 F001-100",
+				"moneda": "USD",
+				"fecha": "10/09/2024",
+				"tipo_cambio": "3.800",
+				"importe_total": "100.00"
+			},
+			{
+				"comp_pago": "01 F001-101",
+				"moneda": "PEN",
+				"fecha": "10/09/2024",
+				"importe_total": "500.00"
+			}
+		]
+	}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sire/validate-tc", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.HandleValidateTC(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	resp := rec.Body.String()
+	if !strings.Contains(resp, `"success":true`) || !strings.Contains(resp, `"total_usd":1`) {
+		t.Fatalf("response missing expected validation report: %s", resp)
+	}
+}
+
+func TestHandleValidateCPE_EmptyItems(t *testing.T) {
+	t.Parallel()
+
+	server := &Server{}
+	body := strings.NewReader(`{
+		"book": "RCE",
+		"items": []
+	}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sire/validate-cpe", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.HandleValidateCPE(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	resp := rec.Body.String()
+	if !strings.Contains(resp, `"success":true`) {
+		t.Fatalf("response missing success: %s", resp)
+	}
+}
+
+func TestHandleValidateSSCO_EmptyItems(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	svc := ssco.NewService(tmpDir)
+	server := &Server{sscoService: svc}
+
+	body := strings.NewReader(`{
+		"book": "RCE",
+		"items": []
+	}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sire/validate-ssco", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.HandleValidateSSCO(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	resp := rec.Body.String()
+	if !strings.Contains(resp, `"success":true`) {
+		t.Fatalf("response missing success: %s", resp)
+	}
+}
+
+func TestHandleDetectCuadre(t *testing.T) {
+	t.Parallel()
+
+	server := &Server{}
+	body := strings.NewReader(`{
+		"book": "RCE",
+		"items": [
+			{
+				"comp_pago": "01-F001-00000001",
+				"bi_gravada": "1000.01",
+				"igv": "180.00",
+				"importe_total": "1180.00"
+			}
+		]
+	}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sire/cuadre/detect", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.HandleDetectCuadre(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	resp := rec.Body.String()
+	if !strings.Contains(resp, `"success":true`) || !strings.Contains(resp, `"total_descuadres":1`) {
+		t.Fatalf("response missing expected descuadre report: %s", resp)
+	}
+}
+
+func TestHandleDetectCorrelativos(t *testing.T) {
+	t.Parallel()
+
+	server := &Server{}
+	body := strings.NewReader(`{
+		"book": "RVIE",
+		"items": [
+			{
+				"tipo": "01",
+				"serie": "F001",
+				"numero": "00000001",
+				"fecha": "01/09/2026"
+			},
+			{
+				"tipo": "01",
+				"serie": "F001",
+				"numero": "00000003",
+				"fecha": "05/09/2026"
+			}
+		]
+	}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/sire/correlativos/detect", body)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.HandleDetectCorrelativos(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	resp := rec.Body.String()
+	if !strings.Contains(resp, `"success":true`) || !strings.Contains(resp, `"total_faltantes":1`) {
+		t.Fatalf("response missing expected correlativos report: %s", resp)
+	}
+}
+
+

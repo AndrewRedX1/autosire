@@ -1,6 +1,16 @@
 document.addEventListener('DOMContentLoaded', () => {
   const $ = (id) => document.getElementById(id);
 
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+  const escapeHTML = escapeHtml;
+
   function showToast(message, type = 'info') {
     let container = document.getElementById('notionToastContainer');
     if (!container) {
@@ -49,12 +59,18 @@ document.addEventListener('DOMContentLoaded', () => {
     isDanger = false
   }) {
     return new Promise((resolve) => {
-      const oldOverlay = document.getElementById('notionSwalOverlay');
-      if (oldOverlay) oldOverlay.remove();
+      // Si existía un diálogo previo, cerrarlo y limpiarlo
+      const oldDialog = document.getElementById('notionSwalDialog');
+      if (oldDialog) {
+        try { if (oldDialog.open) oldDialog.close(); } catch (_) {}
+        oldDialog.remove();
+      }
 
-      const overlay = document.createElement('div');
-      overlay.id = 'notionSwalOverlay';
-      overlay.className = 'notion-swal-overlay';
+      // Usar elemento <dialog> nativo para que el navegador lo sitúe en el Top Layer
+      // garantizando que aparezca SIEMPRE por encima de cualquier otro modal abierto
+      const dialog = document.createElement('dialog');
+      dialog.id = 'notionSwalDialog';
+      dialog.className = 'notion-swal-dialog';
 
       let iconSvg = '';
       if (type === 'success') {
@@ -84,8 +100,8 @@ document.addEventListener('DOMContentLoaded', () => {
           </svg>`;
       }
 
-      overlay.innerHTML = `
-        <div class="notion-swal-card" role="dialog" aria-modal="true">
+      dialog.innerHTML = `
+        <div class="notion-swal-card" role="document">
           <div class="notion-swal-icon ${type}">
             ${iconSvg}
           </div>
@@ -98,35 +114,77 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       `;
 
-      document.body.appendChild(overlay);
+      document.body.appendChild(dialog);
+
+      // showModal() coloca este diálogo al frente del Top Layer, encima de cualquier otro modal
+      try {
+        dialog.showModal();
+      } catch (_) {
+        dialog.setAttribute('open', '');
+      }
 
       requestAnimationFrame(() => {
-        overlay.classList.add('active');
+        dialog.classList.add('active');
         const confirmBtn = document.getElementById('notionSwalBtnConfirm');
         if (confirmBtn) confirmBtn.focus();
       });
 
+      let isClosed = false;
       function cleanup(result) {
-        overlay.classList.remove('active');
-        window.removeEventListener('keydown', handleKeyDown);
-        setTimeout(() => overlay.remove(), 220);
-        resolve(result);
+        if (isClosed) return;
+        isClosed = true;
+        dialog.classList.remove('active');
+        window.removeEventListener('keydown', handleGlobalKeyDown, true);
+        setTimeout(() => {
+          try {
+            if (dialog.open) dialog.close();
+          } catch (_) {}
+          dialog.remove();
+          resolve(result);
+        }, 180);
       }
 
-      function handleKeyDown(e) {
+      // Evento cancel del diálogo (tecla Escape)
+      dialog.addEventListener('cancel', (e) => {
+        e.preventDefault();
+        cleanup(false);
+      });
+
+      function handleGlobalKeyDown(e) {
         if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
           cleanup(false);
         } else if (e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation();
           cleanup(true);
         }
       }
+      window.addEventListener('keydown', handleGlobalKeyDown, true);
 
-      window.addEventListener('keydown', handleKeyDown);
+      // Botones de acción
+      dialog.querySelector('#notionSwalBtnConfirm')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        cleanup(true);
+      });
+      dialog.querySelector('#notionSwalBtnCancel')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        cleanup(false);
+      });
 
-      document.getElementById('notionSwalBtnConfirm')?.addEventListener('click', () => cleanup(true));
-      document.getElementById('notionSwalBtnCancel')?.addEventListener('click', () => cleanup(false));
-      overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) cleanup(false);
+      // Clic fuera de la tarjeta (en el backdrop del diálogo)
+      dialog.addEventListener('click', (e) => {
+        const card = dialog.querySelector('.notion-swal-card');
+        if (!card) return;
+        const rect = card.getBoundingClientRect();
+        const isInCard = (
+          rect.top <= e.clientY && e.clientY <= rect.bottom &&
+          rect.left <= e.clientX && e.clientX <= rect.right
+        );
+        if (!isInCard) {
+          cleanup(false);
+        }
       });
     });
   }
@@ -471,6 +529,9 @@ document.addEventListener('DOMContentLoaded', () => {
     chkVerClientSecret.addEventListener('change', (e) => {
       $('txtEmpresaClientSecret').type = e.target.checked ? 'text' : 'password';
     });
+    $('chkVerCpeClientSecret')?.addEventListener('change', (e) => {
+      $('txtEmpresaCpeClientSecret').type = e.target.checked ? 'text' : 'password';
+    });
 
     // SIRE & Descargas RCE / RVIE
     $('btnDownloadProposalRce')?.addEventListener('click', () => downloadProposalForBook('RCE'));
@@ -539,17 +600,44 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    // Manejo de clic en ítems de validación (por el momento sólo UI)
+    // Manejo de clic en ítems de validación
     document.querySelectorAll('.dropdown-menu .dropdown-item').forEach((item) => {
       item.addEventListener('click', (e) => {
         e.stopPropagation();
         const wrap = item.closest('.dropdown-wrap');
         if (wrap) wrap.classList.remove('open');
-        const label = item.querySelector('span:last-child')?.textContent || 'Opción';
+        const action = item.dataset.action;
         const book = item.dataset.book || '';
+        if (action === 'val-tc') {
+          openValidateTcModal(book);
+          return;
+        }
+        if (action === 'val-cpe') {
+          openValidateCpeModal(book);
+          return;
+        }
+        if (action === 'val-ssco') {
+          openValidateSscoModal(book);
+          return;
+        }
+        if (action === 'val-cuadre') {
+          openCuadreModal(book);
+          return;
+        }
+        if (action === 'val-correl') {
+          openCorrelModal(book);
+          return;
+        }
+        const label = item.querySelector('span:last-child')?.textContent || 'Opción';
         showToast(`${label} (${book}) — Función en preparación`, 'info');
       });
     });
+
+    initValidateTcEvents();
+    initValidateCpeEvents();
+    initValidateSscoEvents();
+    initCuadreEvents();
+    initCorrelEvents();
 
     $('uploadedRecordsBody').addEventListener('click', handleRecordAction);
     $('proposalPreviewBodyRce')?.addEventListener('click', handleRecordAction);
@@ -919,8 +1007,10 @@ document.addEventListener('DOMContentLoaded', () => {
     formModalEmpresa.reset();
     $('chkVerClaveSol').checked = false;
     $('chkVerClientSecret').checked = false;
+    if ($('chkVerCpeClientSecret')) $('chkVerCpeClientSecret').checked = false;
     $('txtEmpresaClaveSol').type = 'password';
     $('txtEmpresaClientSecret').type = 'password';
+    if ($('txtEmpresaCpeClientSecret')) $('txtEmpresaCpeClientSecret').type = 'password';
 
     if (isEdit && companyId) {
       modalEmpresaTitle.textContent = 'EDITAR EMPRESA';
@@ -934,6 +1024,11 @@ document.addEventListener('DOMContentLoaded', () => {
         $('txtEmpresaNombre').value = c.razon_social || '';
         $('txtEmpresaUsuarioSol').value = c.usuario_sol || '';
         $('txtEmpresaClientId').value = c.client_id || '';
+        if ($('txtEmpresaCpeClientId')) $('txtEmpresaCpeClientId').value = c.cpe_client_id || '';
+        if ($('txtEmpresaCpeClientSecret')) {
+          $('txtEmpresaCpeClientSecret').value = '';
+          $('txtEmpresaCpeClientSecret').placeholder = c.cpe_client_secret ? '••••••••••••••••' : 'Ingrese Api Clave CPE';
+        }
         $('cboEmpresaRegimen').value = c.regimen || '';
         $('txtEmpresaWhatsapp').value = c.whatsapp || '';
         $('txtEmpresaClaveSol').placeholder = '••••••••••••';
@@ -945,6 +1040,11 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       modalEmpresaTitle.textContent = 'NUEVA EMPRESA';
       $('empresaId').value = '0';
+      if ($('txtEmpresaCpeClientId')) $('txtEmpresaCpeClientId').value = '';
+      if ($('txtEmpresaCpeClientSecret')) {
+        $('txtEmpresaCpeClientSecret').value = '';
+        $('txtEmpresaCpeClientSecret').placeholder = '••••••••••••••••';
+      }
       $('txtEmpresaClaveSol').placeholder = '••••••••••••';
       $('txtEmpresaClientSecret').placeholder = '••••••••••••••••';
     }
@@ -969,9 +1069,12 @@ document.addEventListener('DOMContentLoaded', () => {
       clave_sol: $('txtEmpresaClaveSol').value,
       client_id: $('txtEmpresaClientId').value.trim(),
       client_secret: $('txtEmpresaClientSecret').value,
+      cpe_client_id: $('txtEmpresaCpeClientId')?.value.trim() || '',
+      cpe_client_secret: $('txtEmpresaCpeClientSecret')?.value || '',
       regimen: $('cboEmpresaRegimen').value,
       whatsapp: $('txtEmpresaWhatsapp').value.trim()
     };
+
 
     try {
       const response = await apiFetch('/api/companies', {
@@ -3145,8 +3248,2208 @@ document.addEventListener('DOMContentLoaded', () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
   }
 
+  // =========================================================
+  // Módulo: Validación de Tipo de Cambio (T.Cambio)
+  // =========================================================
+  let currentTcBook = 'RCE';
+  let currentTcReport = null;
+  let currentTcSelectedIndices = new Set();
+
+  function initValidateTcEvents() {
+    const modal = $('modalValidarTc');
+    if (!modal) return;
+
+    $('btnCerrarModalTc')?.addEventListener('click', () => modal.close());
+    $('btnCancelarModalTc')?.addEventListener('click', () => modal.close());
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.close();
+    });
+
+    // Selector de Cotización (Venta / Compra)
+    document.querySelectorAll('input[name="tcRateChoice"]').forEach((radio) => {
+      radio.addEventListener('change', () => {
+        if (modal.open) {
+          fetchAndRenderTcValidation(radio.value);
+        }
+      });
+    });
+
+    // Filtros y Selección
+    $('btnTcSelectDiff')?.addEventListener('click', () => {
+      currentTcSelectedIndices.clear();
+      (currentTcReport?.items || []).forEach((it) => {
+        if (it.estado === 'DIFERENTE' || it.estado === 'VACIO') {
+          currentTcSelectedIndices.add(it.index);
+        }
+      });
+      syncTcCheckboxUI();
+    });
+
+    $('btnTcSelectAll')?.addEventListener('click', () => {
+      currentTcSelectedIndices.clear();
+      (currentTcReport?.items || []).forEach((it) => currentTcSelectedIndices.add(it.index));
+      syncTcCheckboxUI();
+    });
+
+    $('btnTcDeselectAll')?.addEventListener('click', () => {
+      currentTcSelectedIndices.clear();
+      syncTcCheckboxUI();
+    });
+
+    $('tcMasterCheck')?.addEventListener('change', (e) => {
+      const checked = e.target.checked;
+      const visibleCheckboxes = document.querySelectorAll('#tbodyValidarTc .tc-item-check');
+      visibleCheckboxes.forEach((cb) => {
+        const idx = parseInt(cb.dataset.index, 10);
+        cb.checked = checked;
+        if (checked) {
+          currentTcSelectedIndices.add(idx);
+        } else {
+          currentTcSelectedIndices.delete(idx);
+        }
+      });
+      updateTcApplyButtonState();
+    });
+
+    $('chkOnlyShowDiff')?.addEventListener('change', () => {
+      renderTcTableRows();
+    });
+
+    $('btnAplicarModalTc')?.addEventListener('click', applyTcChanges);
+  }
+
+  async function openValidateTcModal(book) {
+    currentTcBook = book || 'RCE';
+    const isRce = currentTcBook === 'RCE';
+    const allItems = isRce ? currentProposalItemsRce : currentProposalItemsRvie;
+
+    if (!allItems || !allItems.length) {
+      notifyWarning(
+        'Sin Comprobantes',
+        `Primero debes generar y previsualizar la propuesta de ${isRce ? 'Compras (RCE)' : 'Ventas (RVIE)'}.`
+      );
+      return;
+    }
+
+    const hasForeign = allItems.some((it) => {
+      const m = (it.moneda || '').trim().toUpperCase();
+      return m && m !== 'PEN';
+    });
+
+    if (!hasForeign) {
+      notifyInfo(
+        'Sin Comprobantes en Moneda Extranjera',
+        `Todos los comprobantes de la propuesta ${currentTcBook} están en Soles (PEN). No hay operaciones en dólares u otra moneda para auditar.`
+      );
+      return;
+    }
+
+    const modal = $('modalValidarTc');
+    if (!modal) return;
+
+    // Título y selector por defecto
+    const title = $('modalValidarTcTitle');
+    if (title) {
+      title.textContent = `Validación de Tipo de Cambio — ${isRce ? 'Compras (RCE)' : 'Ventas (RVIE)'}`;
+    }
+
+    const choiceVenta = $('tcChoiceVenta');
+    if (choiceVenta) choiceVenta.checked = true;
+
+    const chkDiff = $('chkOnlyShowDiff');
+    if (chkDiff) chkDiff.checked = false;
+
+    modal.showModal();
+    await fetchAndRenderTcValidation('Venta');
+  }
+
+  async function fetchAndRenderTcValidation(tcType = 'Venta') {
+    const isRce = currentTcBook === 'RCE';
+    const allItems = isRce ? currentProposalItemsRce : currentProposalItemsRvie;
+    const tbody = $('tbodyValidarTc');
+    const applyBtn = $('btnAplicarModalTc');
+    const statusText = $('tcFooterSummary');
+
+    if (tbody) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="11" style="text-align:center; padding: 36px; color: var(--notion-text-muted);">
+            <span class="spinner" style="display:inline-block; margin-right:8px;"></span>
+            Sincronizando cotizaciones oficiales de SUNAT y auditando comprobantes…
+          </td>
+        </tr>
+      `;
+    }
+    if (applyBtn) applyBtn.disabled = true;
+    if (statusText) statusText.textContent = 'Consultando cotizaciones de SUNAT…';
+
+    try {
+      const res = await fetch('/api/sire/validate-tc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          book: currentTcBook,
+          tc_type: tcType,
+          items: allItems
+        })
+      });
+
+      if (!res.ok) {
+        let errMsg = `Error en servidor: ${res.status}`;
+        try {
+          const errData = await res.json();
+          if (errData && errData.error) errMsg = errData.error;
+          else if (errData && errData.message) errMsg = errData.message;
+        } catch (_) {}
+        throw new Error(errMsg);
+      }
+
+
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || 'No se pudo procesar la validación');
+      }
+
+      currentTcReport = data.report;
+
+      // Actualizar contadores de métricas
+      $('tcMetricTotal').textContent = currentTcReport.total_usd || 0;
+      $('tcMetricOk').textContent = currentTcReport.total_ok || 0;
+      $('tcMetricDiff').textContent = currentTcReport.total_diferente || 0;
+      $('tcMetricVacio').textContent = currentTcReport.total_vacio || 0;
+
+      // Por defecto, pre-seleccionar los que tienen discrepancia (DIFERENTE o VACÍO)
+      currentTcSelectedIndices.clear();
+      (currentTcReport.items || []).forEach((it) => {
+        if (it.estado === 'DIFERENTE' || it.estado === 'VACIO') {
+          currentTcSelectedIndices.add(it.index);
+        }
+      });
+
+      renderTcTableRows();
+    } catch (err) {
+      if (tbody) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="11" style="text-align:center; padding: 28px; color: #dc2626;">
+              ⚠️ Error al validar tipo de cambio: ${escapeHtml(err.message)}
+            </td>
+          </tr>
+        `;
+      }
+      if (statusText) statusText.textContent = 'Ocurrió un error al consultar SUNAT.';
+    }
+  }
+
+  function renderTcTableRows() {
+    const tbody = $('tbodyValidarTc');
+    if (!tbody || !currentTcReport) return;
+
+    const items = currentTcReport.items || [];
+    const onlyDiff = $('chkOnlyShowDiff')?.checked;
+
+    const visibleItems = onlyDiff
+      ? items.filter((it) => it.estado === 'DIFERENTE' || it.estado === 'VACIO' || it.estado === 'SIN_TC')
+      : items;
+
+    if (!visibleItems.length) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="11" style="text-align:center; padding: 28px; color: var(--notion-text-muted);">
+            ${onlyDiff ? 'No hay comprobantes con discrepancias bajo el criterio seleccionado.' : 'No se encontraron comprobantes en moneda extranjera.'}
+          </td>
+        </tr>
+      `;
+      updateTcApplyButtonState();
+      return;
+    }
+
+    const fmtMoney = (n) => Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmtTc = (n) => (n > 0 ? Number(n).toFixed(4) : '—');
+
+    tbody.innerHTML = visibleItems.map((it, displayIdx) => {
+      const isChecked = currentTcSelectedIndices.has(it.index);
+      let rowClass = '';
+      let badgeClass = 'tc-badge-ok';
+      let badgeLabel = 'OK';
+
+      switch (it.estado) {
+        case 'DIFERENTE':
+          rowClass = 'row-diff';
+          badgeClass = 'tc-badge-diff';
+          badgeLabel = 'DIFERENTE';
+          break;
+        case 'VACIO':
+          rowClass = 'row-vacio';
+          badgeClass = 'tc-badge-vacio';
+          badgeLabel = 'SIN T/C';
+          break;
+        case 'SIN_TC':
+          badgeClass = 'tc-badge-sintc';
+          badgeLabel = 'SIN COTIZACIÓN';
+          break;
+        case 'ERROR_FECHA':
+          badgeClass = 'tc-badge-err';
+          badgeLabel = 'ERROR FECHA';
+          break;
+        default:
+          badgeClass = 'tc-badge-ok';
+          badgeLabel = 'COINCIDE';
+      }
+
+      const diffText = it.diferencia !== 0 ? (it.diferencia > 0 ? `+${it.diferencia.toFixed(4)}` : it.diferencia.toFixed(4)) : '0.0000';
+      const refNote = it.es_nota_credito ? `<br><small style="color:var(--notion-text-muted);">[NC Ref: ${escapeHtml(it.fecha_usada)}]</small>` : '';
+
+      return `
+        <tr class="${rowClass}">
+          <td style="text-align:center;">
+            <input type="checkbox" class="tc-item-check" data-index="${it.index}" ${isChecked ? 'checked' : ''}>
+          </td>
+          <td style="text-align:center; color: var(--notion-text-muted);">${displayIdx + 1}</td>
+          <td><strong>${escapeHtml(it.comp_pago || '—')}</strong></td>
+          <td>${escapeHtml(it.fecha_usada || '—')}${refNote}</td>
+          <td style="text-align:center;"><code>${escapeHtml(it.moneda || 'USD')}</code></td>
+          <td style="text-align:right; font-family:var(--font-mono);">${fmtTc(it.tc_archivo)}</td>
+          <td style="text-align:right; font-family:var(--font-mono); font-weight:600;">${fmtTc(it.tc_sunat)}</td>
+          <td style="text-align:right; font-family:var(--font-mono); color:${it.diferencia !== 0 ? '#b45309' : 'inherit'};">${diffText}</td>
+          <td style="text-align:center;"><span class="tc-badge-status ${badgeClass}">${badgeLabel}</span></td>
+          <td style="text-align:right; font-family:var(--font-mono);">S/ ${fmtMoney(it.importe_original)}</td>
+          <td style="text-align:right; font-family:var(--font-mono); font-weight:600; color:${it.importe_original !== it.importe_recalculado ? '#047857' : 'inherit'};">S/ ${fmtMoney(it.importe_recalculado)}</td>
+        </tr>
+      `;
+    }).join('');
+
+    // Listener para checkboxes de filas individuales
+    tbody.querySelectorAll('.tc-item-check').forEach((cb) => {
+      cb.addEventListener('change', () => {
+        const idx = parseInt(cb.dataset.index, 10);
+        if (cb.checked) {
+          currentTcSelectedIndices.add(idx);
+        } else {
+          currentTcSelectedIndices.delete(idx);
+        }
+        updateTcApplyButtonState();
+      });
+    });
+
+    updateTcApplyButtonState();
+  }
+
+  function syncTcCheckboxUI() {
+    const checkboxes = document.querySelectorAll('#tbodyValidarTc .tc-item-check');
+    checkboxes.forEach((cb) => {
+      const idx = parseInt(cb.dataset.index, 10);
+      cb.checked = currentTcSelectedIndices.has(idx);
+    });
+    updateTcApplyButtonState();
+  }
+
+  function updateTcApplyButtonState() {
+    const applyBtn = $('btnAplicarModalTc');
+    const statusText = $('tcFooterSummary');
+    const totalSelected = currentTcSelectedIndices.size;
+
+    if (applyBtn) {
+      applyBtn.disabled = totalSelected === 0;
+      const btnText = applyBtn.querySelector('.btn-text');
+      if (btnText) {
+        btnText.textContent = totalSelected > 0
+          ? `Cambiar T/C y Recalcular (${totalSelected})`
+          : 'Cambiar T/C y Recalcular';
+      }
+    }
+
+    if (statusText) {
+      if (totalSelected > 0) {
+        statusText.textContent = `${totalSelected} comprobante(s) marcado(s) para actualizar importes.`;
+      } else {
+        statusText.textContent = 'Seleccione los comprobantes que desea corregir y recalcular.';
+      }
+    }
+
+    // Actualizar master check
+    const masterCheck = $('tcMasterCheck');
+    const visibleCheckboxes = document.querySelectorAll('#tbodyValidarTc .tc-item-check');
+    if (masterCheck && visibleCheckboxes.length > 0) {
+      const allChecked = Array.from(visibleCheckboxes).every((cb) => cb.checked);
+      masterCheck.checked = allChecked;
+    }
+  }
+
+  async function applyTcChanges() {
+    if (!currentTcReport || currentTcSelectedIndices.size === 0) return;
+
+    const count = currentTcSelectedIndices.size;
+    const confirmed = await notifyConfirm(
+      '¿Aplicar Tipo de Cambio SUNAT?',
+      `Se actualizará el tipo de cambio oficial y se recalcularán los montos de ${count} comprobante(s) en la propuesta activa.`,
+      'Sí, aplicar cambios'
+    );
+    if (!confirmed) return;
+
+    const isRce = currentTcBook === 'RCE';
+    const allItems = isRce ? currentProposalItemsRce : currentProposalItemsRvie;
+
+    // Crear mapa de cambios desde el reporte
+    let appliedCount = 0;
+    for (const valItem of currentTcReport.items || []) {
+      if (currentTcSelectedIndices.has(valItem.index)) {
+        if (valItem.index >= 0 && valItem.index < allItems.length) {
+          allItems[valItem.index] = valItem.item_recalculado;
+          appliedCount++;
+        }
+      }
+    }
+
+    // Re-renderizar la grilla de propuesta en pantalla
+    renderProposalTableGrid(isRce, allItems);
+
+    // Cerrar modal
+    $('modalValidarTc')?.close();
+
+    notifySuccess(
+      'Tipo de Cambio Aplicado',
+      `Se aplicaron las cotizaciones oficiales de SUNAT y se recalcularon los importes en ${appliedCount} comprobante(s).`
+    );
+  }
+
+  // =========================================================
+  // Módulo: Validación de Comprobantes de Pago (CPE) en SUNAT
+  // =========================================================
+  let currentCpeBook = 'RCE';
+  let currentCpeReport = null;
+  let currentCpeValidatedItems = [];
+  let currentCpeAbortController = null;
+  let currentCpeFilter = 'all'; // 'all', 'risk', 'ok'
+  let currentCpeSearchQuery = '';
+
+  function initValidateCpeEvents() {
+    const modal = $('modalValidarCpe');
+    if (!modal) return;
+
+    $('btnCerrarModalCpeCross')?.addEventListener('click', () => {
+      abortCpeValidation();
+      modal.close();
+    });
+    $('btnCancelarModalCpe')?.addEventListener('click', () => {
+      abortCpeValidation();
+      modal.close();
+    });
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        abortCpeValidation();
+        modal.close();
+      }
+    });
+
+    // Filtros por píldoras
+    $('btnCpeFilterAll')?.addEventListener('click', () => setCpeFilter('all'));
+    $('btnCpeFilterRisk')?.addEventListener('click', () => setCpeFilter('risk'));
+    $('btnCpeFilterOk')?.addEventListener('click', () => setCpeFilter('ok'));
+
+    // Búsqueda
+    $('txtCpeSearch')?.addEventListener('input', (e) => {
+      currentCpeSearchQuery = (e.target.value || '').trim().toLowerCase();
+      renderCpeTableRows();
+    });
+
+    // Botones de acción
+    $('btnIniciarModalCpe')?.addEventListener('click', startCpeValidation);
+    $('btnDetenerCpe')?.addEventListener('click', abortCpeValidation);
+    $('btnExportarExcelCpe')?.addEventListener('click', exportCpeToExcel);
+  }
+
+  function setCpeFilter(filter) {
+    currentCpeFilter = filter;
+    document.querySelectorAll('.cpe-pill-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.filter === filter);
+    });
+    renderCpeTableRows();
+  }
+
+  function openValidateCpeModal(book) {
+    currentCpeBook = book || 'RCE';
+    const isRce = currentCpeBook === 'RCE';
+    const allItems = isRce ? currentProposalItemsRce : currentProposalItemsRvie;
+
+    if (!allItems || !allItems.length) {
+      notifyWarning(
+        'Sin Comprobantes',
+        `Primero debes generar y previsualizar la propuesta de ${isRce ? 'Compras (RCE)' : 'Ventas (RVIE)'}.`
+      );
+      return;
+    }
+
+    const modal = $('modalValidarCpe');
+    if (!modal) return;
+
+    // Título y subtítulo
+    const title = $('modalValidarCpeTitle');
+    if (title) {
+      title.textContent = `Validación de Comprobantes — ${isRce ? 'Compras (RCE)' : 'Ventas (RVIE)'}`;
+    }
+
+    // Configurar selector de alcance
+    $('cpeCountAll').textContent = allItems.length;
+    $('cpeScopeAll').checked = true;
+
+    // Detectar si hay filas seleccionadas en la grilla principal
+    const selectedCheckboxes = document.querySelectorAll(
+      isRce ? '#proposalPreviewBodyRce .row-select:checked' : '#proposalPreviewBodyRvie .row-select:checked'
+    );
+    const lblSelected = $('lblCpeScopeSelected');
+    if (selectedCheckboxes.length > 0) {
+      lblSelected.style.display = 'inline-flex';
+      $('cpeCountSelected').textContent = selectedCheckboxes.length;
+    } else {
+      lblSelected.style.display = 'none';
+    }
+
+    // Resetear métricas a 0
+    currentCpeReport = null;
+    currentCpeValidatedItems = [];
+    currentCpeFilter = 'all';
+    currentCpeSearchQuery = '';
+    if ($('txtCpeSearch')) $('txtCpeSearch').value = '';
+    setCpeFilter('all');
+
+    $('cpeMetricTotal').textContent = '0';
+    $('cpeMetricAceptado').textContent = '0';
+    $('cpeMetricAnulado').textContent = '0';
+    $('cpeMetricNoExiste').textContent = '0';
+    $('cpeMetricRiesgo').textContent = '0';
+
+    $('cpePillCountAll').textContent = '0';
+    $('cpePillCountRisk').textContent = '0';
+    $('cpePillCountOk').textContent = '0';
+
+    $('cpeProgressContainer').style.display = 'none';
+    $('cpeProgressBarFill').style.width = '0%';
+    $('btnExportarExcelCpe').style.display = 'none';
+    $('btnDetenerCpe').style.display = 'none';
+    $('btnIniciarModalCpe').style.display = 'inline-flex';
+    $('btnIniciarModalCpe').disabled = false;
+    $('spinnerModalCpe').style.display = 'none';
+
+    $('cpeFooterSummary').textContent = `${allItems.length} comprobante(s) listos para auditar en SUNAT.`;
+
+    const tbody = $('tbodyValidarCpe');
+    if (tbody) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="9" style="text-align:center; padding: 36px; color: var(--notion-text-subtle);">
+            Haga clic en <strong>"Iniciar Validación"</strong> para auditar la validez fiscal contra SUNAT.
+          </td>
+        </tr>
+      `;
+    }
+
+    modal.showModal();
+  }
+
+  function abortCpeValidation() {
+    if (currentCpeAbortController) {
+      currentCpeAbortController.abort();
+      currentCpeAbortController = null;
+    }
+    const btnIniciar = $('btnIniciarModalCpe');
+    const btnDetener = $('btnDetenerCpe');
+    const spinner = $('spinnerModalCpe');
+
+    if (btnIniciar) {
+      btnIniciar.style.display = 'inline-flex';
+      btnIniciar.disabled = false;
+    }
+    if (btnDetener) btnDetener.style.display = 'none';
+    if (spinner) spinner.style.display = 'none';
+    const progressText = $('cpeProgressText');
+    if (progressText) progressText.textContent = 'Validación detenida';
+  }
+
+  async function startCpeValidation() {
+    const isRce = currentCpeBook === 'RCE';
+    const allItems = isRce ? currentProposalItemsRce : currentProposalItemsRvie;
+    if (!allItems || !allItems.length) return;
+
+    let targetItems = allItems;
+    const isSelectedScope = $('cpeScopeSelected')?.checked;
+    if (isSelectedScope) {
+      const selectedCheckboxes = document.querySelectorAll(
+        isRce ? '#proposalPreviewBodyRce .row-select:checked' : '#proposalPreviewBodyRvie .row-select:checked'
+      );
+      const selectedIndices = new Set(Array.from(selectedCheckboxes).map((cb) => parseInt(cb.dataset.index, 10)));
+      targetItems = allItems.filter((_, idx) => selectedIndices.has(idx));
+    }
+
+    if (!targetItems.length) {
+      notifyWarning('Sin Comprobantes', 'No hay comprobantes seleccionados para validar.');
+      return;
+    }
+
+    // UI en estado de ejecución
+    const btnIniciar = $('btnIniciarModalCpe');
+    const btnDetener = $('btnDetenerCpe');
+    const spinner = $('spinnerModalCpe');
+    const progressContainer = $('cpeProgressContainer');
+    const progressBar = $('cpeProgressBarFill');
+    const progressText = $('cpeProgressText');
+    const progressPct = $('cpeProgressPct');
+    const footerSummary = $('cpeFooterSummary');
+    const tbody = $('tbodyValidarCpe');
+
+    btnIniciar.style.display = 'none';
+    btnDetener.style.display = 'inline-flex';
+    spinner.style.display = 'inline-block';
+    progressContainer.style.display = 'block';
+    progressBar.style.width = '0%';
+    progressPct.textContent = '0%';
+    progressText.textContent = `Iniciando consulta de ${targetItems.length} comprobante(s) en SUNAT...`;
+    footerSummary.textContent = 'Conectando con la API de validación de SUNAT...';
+
+    currentCpeValidatedItems = [];
+    currentCpeReport = null;
+    currentCpeAbortController = new AbortController();
+
+    if (tbody) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="9" style="text-align:center; padding: 36px; color: var(--notion-text-muted);">
+            <span class="spinner" style="display:inline-block; margin-right:8px;"></span>
+            Consultando estado oficial en SUNAT en tiempo real...
+          </td>
+        </tr>
+      `;
+    }
+
+    let itemsMap = new Map();
+    let totalItems = targetItems.length;
+
+    try {
+      const res = await fetch('/api/sire/validate-cpe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          book: currentCpeBook,
+          items: targetItems,
+          stream: true
+        }),
+        signal: currentCpeAbortController.signal
+      });
+
+      if (!res.ok) {
+        let errMsg = `Error en servidor: ${res.status}`;
+        try {
+          const errData = await res.json();
+          if (errData && errData.error) errMsg = errData.error;
+          else if (errData && errData.message) errMsg = errData.message;
+        } catch (_) {}
+        throw new Error(errMsg);
+      }
+
+
+      const contentType = res.headers.get('Content-Type') || '';
+      if (contentType.includes('application/x-ndjson')) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop(); // la última línea puede estar incompleta
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const msg = JSON.parse(line);
+              if (msg.type === 'item') {
+                const item = msg.item;
+                itemsMap.set(item.index, item);
+                currentCpeValidatedItems = Array.from(itemsMap.values());
+
+                const current = msg.current;
+                const total = msg.total || totalItems;
+                const pct = Math.round((current / total) * 100);
+
+                progressBar.style.width = `${pct}%`;
+                progressPct.textContent = `${pct}%`;
+                progressText.textContent = `Validando comprobante ${current} de ${total}...`;
+
+                updateCpeLiveMetrics(currentCpeValidatedItems);
+
+                // Re-renderizado de tabla cada 5 comprobantes o en los primeros para fluidez
+                if (current <= 5 || current % 5 === 0 || current === total) {
+                  renderCpeTableRows();
+                }
+              } else if (msg.type === 'report') {
+                currentCpeReport = msg.report;
+                currentCpeValidatedItems = currentCpeReport.items || [];
+              } else if (msg.type === 'error') {
+                throw new Error(msg.error || 'Error reportado por el servidor');
+              }
+            } catch (parseErr) {
+              console.warn('Línea ndjson no parseable:', line, parseErr);
+            }
+          }
+        }
+      } else {
+        // Modo JSON directo (fallback)
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Error al validar comprobantes');
+        currentCpeReport = data.report;
+        currentCpeValidatedItems = currentCpeReport.items || [];
+      }
+
+      // Finalización
+      progressBar.style.width = '100%';
+      progressPct.textContent = '100%';
+      progressText.textContent = `Validación completada (${currentCpeValidatedItems.length} comprobantes)`;
+
+      updateCpeFinalMetrics(currentCpeReport || { items: currentCpeValidatedItems });
+      renderCpeTableRows();
+
+      $('btnExportarExcelCpe').style.display = 'inline-flex';
+      const conRiesgo = (currentCpeReport?.total_con_riesgo) || currentCpeValidatedItems.filter(it => it.es_riesgo).length;
+      footerSummary.textContent = `Validación finalizada. ${currentCpeValidatedItems.length} comprobante(s) procesados.` +
+        (conRiesgo > 0 ? ` (${conRiesgo} con riesgo fiscal detectado)` : ' (Todos conformes)');
+
+      if (conRiesgo > 0) {
+        notifyWarning(
+          'Validación Finalizada con Observaciones',
+          `Se auditaron ${currentCpeValidatedItems.length} comprobantes. Se detectaron ${conRiesgo} con observaciones o riesgo fiscal.`
+        );
+      } else {
+        notifySuccess(
+          'Validación Conforme',
+          `Todos los ${currentCpeValidatedItems.length} comprobantes fueron validados y se encuentran conformes en SUNAT.`
+        );
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        notifyInfo('Validación Cancelada', 'La auditoría de comprobantes fue interrumpida por el usuario.');
+      } else {
+        const errorMsg = (err.message || '').toLowerCase().includes('network error')
+          ? 'Se interrumpió la conexión con el servidor o con SUNAT durante la validación.'
+          : err.message;
+        notifyError('Error al Validar CPE', errorMsg);
+        if (tbody && currentCpeValidatedItems.length === 0) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="9" style="text-align:center; padding: 24px; color: var(--notion-red, #e03e3e);">
+                ⚠️ Error al validar comprobantes: ${escapeHtml(errorMsg)}
+              </td>
+            </tr>
+          `;
+        } else if (currentCpeValidatedItems.length > 0) {
+          footerSummary.textContent = `Validación interrumpida. Se lograron auditar ${currentCpeValidatedItems.length} comprobante(s).`;
+          renderCpeTableRows();
+        }
+      }
+    } finally {
+      btnIniciar.style.display = 'inline-flex';
+      btnDetener.style.display = 'none';
+      spinner.style.display = 'none';
+      currentCpeAbortController = null;
+    }
+  }
+
+  function updateCpeLiveMetrics(items) {
+    let aceptados = 0;
+    let anulados = 0;
+    let noExiste = 0;
+    let alertaRuc = 0;
+
+    for (const it of items) {
+      const cp = (it.estado_cp || '').toUpperCase();
+      const ruc = (it.estado_ruc || '').toUpperCase();
+      const domi = (it.cond_domicilio || '').toUpperCase();
+
+      if (cp === 'ACEPTADO' || cp === 'AUTORIZADO') aceptados++;
+      else if (cp === 'ANULADO') anulados++;
+      else if (cp === 'NO EXISTE' || cp === 'NO AUTORIZADO') noExiste++;
+
+      if (ruc.includes('BAJA') || ruc === 'SUSPENSION TEMPORAL' || domi === 'NO HABIDO' || domi === 'NO HALLADO') {
+        alertaRuc++;
+      }
+    }
+
+    $('cpeMetricTotal').textContent = items.length;
+    $('cpeMetricAceptado').textContent = aceptados;
+    $('cpeMetricAnulado').textContent = anulados;
+    $('cpeMetricNoExiste').textContent = noExiste;
+    $('cpeMetricRiesgo').textContent = alertaRuc;
+
+    const riskCount = items.filter(it => it.es_riesgo).length;
+    $('cpePillCountAll').textContent = items.length;
+    $('cpePillCountRisk').textContent = riskCount;
+    $('cpePillCountOk').textContent = aceptados;
+  }
+
+  function updateCpeFinalMetrics(report) {
+    const items = report.items || [];
+    $('cpeMetricTotal').textContent = report.total_auditados || items.length;
+    $('cpeMetricAceptado').textContent = report.total_aceptados || items.filter(it => it.estado_cp === 'ACEPTADO' || it.estado_cp === 'AUTORIZADO').length;
+    $('cpeMetricAnulado').textContent = report.total_anulados || items.filter(it => it.estado_cp === 'ANULADO').length;
+    $('cpeMetricNoExiste').textContent = report.total_no_existe || items.filter(it => it.estado_cp === 'NO EXISTE' || it.estado_cp === 'NO AUTORIZADO').length;
+    $('cpeMetricRiesgo').textContent = (report.total_baja || 0) + (report.total_no_habido || 0);
+
+    const riskCount = report.total_con_riesgo !== undefined ? report.total_con_riesgo : items.filter(it => it.es_riesgo).length;
+    $('cpePillCountAll').textContent = items.length;
+    $('cpePillCountRisk').textContent = riskCount;
+    $('cpePillCountOk').textContent = $('cpeMetricAceptado').textContent;
+  }
+
+  function renderCpeTableRows() {
+    const tbody = $('tbodyValidarCpe');
+    if (!tbody) return;
+
+    let items = currentCpeValidatedItems;
+    if (!items.length) return;
+
+    // 1. Filtrar por píldora activa
+    if (currentCpeFilter === 'risk') {
+      items = items.filter((it) => it.es_riesgo);
+    } else if (currentCpeFilter === 'ok') {
+      items = items.filter((it) => it.estado_cp === 'ACEPTADO' || it.estado_cp === 'AUTORIZADO');
+    }
+
+    // 2. Filtrar por texto de búsqueda
+    if (currentCpeSearchQuery) {
+      const q = currentCpeSearchQuery;
+      items = items.filter((it) => {
+        return (
+          (it.ruc_emisor || '').toLowerCase().includes(q) ||
+          (it.razon_social || '').toLowerCase().includes(q) ||
+          (it.serie || '').toLowerCase().includes(q) ||
+          (it.numero || '').toLowerCase().includes(q) ||
+          (it.comp_pago || '').toLowerCase().includes(q) ||
+          (it.estado_cp || '').toLowerCase().includes(q)
+        );
+      });
+    }
+
+    if (items.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="9" style="text-align:center; padding: 28px; color: var(--notion-text-subtle);">
+            No hay comprobantes que coincidan con el filtro seleccionado.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tbody.innerHTML = items.map((it, idx) => {
+      const rowRiskClass = it.es_riesgo ? 'row-cpe-risk' : '';
+
+      // Badges
+      let cpBadgeClass = 'badge-cpe-error';
+      const cp = (it.estado_cp || '').toUpperCase();
+      if (cp === 'ACEPTADO') cpBadgeClass = 'badge-cpe-aceptado';
+      else if (cp === 'AUTORIZADO') cpBadgeClass = 'badge-cpe-autorizado';
+      else if (cp === 'ANULADO') cpBadgeClass = 'badge-cpe-anulado';
+      else if (cp === 'NO EXISTE') cpBadgeClass = 'badge-cpe-noexiste';
+      else if (cp === 'NO AUTORIZADO') cpBadgeClass = 'badge-cpe-noautorizado';
+
+      let rucBadgeClass = 'badge-ruc';
+      const ruc = (it.estado_ruc || '').toUpperCase();
+      if (ruc === 'ACTIVO') rucBadgeClass = 'badge-ruc badge-ruc-activo';
+      else if (ruc.includes('BAJA') || ruc.includes('SUSPENSION') || ruc.includes('INHABILITADO')) rucBadgeClass = 'badge-ruc badge-ruc-baja';
+
+      let domiBadgeClass = 'badge-domi';
+      const domi = (it.cond_domicilio || '').toUpperCase();
+      if (domi === 'HABIDO') domiBadgeClass = 'badge-domi badge-domi-habido';
+      else if (domi === 'NO HABIDO' || domi === 'NO HALLADO') domiBadgeClass = 'badge-domi badge-domi-nohabido';
+      else if (domi === 'PENDIENTE') domiBadgeClass = 'badge-domi badge-domi-pendiente';
+
+      const montoFormatted = (it.monto_original || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const compLabel = `${it.tipo ? it.tipo + '-' : ''}${it.serie || ''}-${it.numero || ''}`;
+
+      return `
+        <tr class="${rowRiskClass}">
+          <td style="text-align:center; color: var(--notion-text-muted);">${idx + 1}</td>
+          <td class="cpe-comp-num">${escapeHtml(compLabel)}</td>
+          <td style="text-align:center;">${escapeHtml(it.fecha || '')}</td>
+          <td>
+            <div class="cpe-ruc" style="font-weight:600;">${escapeHtml(it.ruc_emisor || '')}</div>
+            <div style="font-size:0.73rem; color:var(--notion-text-muted); max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+              ${escapeHtml(it.razon_social || '')}
+            </div>
+          </td>
+          <td style="text-align:right; font-family:var(--font-mono, monospace); font-weight:600;">
+            ${escapeHtml(it.moneda || 'PEN')} ${montoFormatted}
+          </td>
+          <td style="text-align:center;">
+            <span class="badge-cpe ${cpBadgeClass}">${escapeHtml(it.estado_cp || 'SIN DATOS')}</span>
+          </td>
+          <td style="text-align:center;">
+            <span class="${rucBadgeClass}">${escapeHtml(it.estado_ruc || '—')}</span>
+          </td>
+          <td style="text-align:center;">
+            <span class="${domiBadgeClass}">${escapeHtml(it.cond_domicilio || '—')}</span>
+          </td>
+          <td style="font-size:0.74rem; color:var(--notion-text-muted);">
+            ${escapeHtml(it.observaciones || '—')}
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function exportCpeToExcel() {
+    if (!currentCpeValidatedItems.length) {
+      notifyWarning('Sin Datos', 'No hay resultados auditados para exportar.');
+      return;
+    }
+
+    const headers = [
+      'N°',
+      'Tipo Comp.',
+      'Serie',
+      'Número',
+      'Fecha Emisión',
+      'RUC Emisor',
+      'Razón Social',
+      'Moneda',
+      'Monto Original',
+      'Estado Comprobante SUNAT',
+      'Estado RUC',
+      'Condición Domicilio',
+      'Observaciones SUNAT',
+      'Riesgo Fiscal'
+    ];
+
+    const rows = currentCpeValidatedItems.map((it, idx) => [
+      idx + 1,
+      it.tipo || '',
+      it.serie || '',
+      it.numero || '',
+      it.fecha || '',
+      `="${it.ruc_emisor || ''}"`,
+      `"${(it.razon_social || '').replace(/"/g, '""')}"`,
+      it.moneda || 'PEN',
+      (it.monto_original || 0).toFixed(2),
+      it.estado_cp || '',
+      it.estado_ruc || '',
+      it.cond_domicilio || '',
+      `"${(it.observaciones || '').replace(/"/g, '""')}"`,
+      it.es_riesgo ? 'SI' : 'NO'
+    ]);
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+    a.download = `Validacion_CPE_SUNAT_${currentCpeBook}_${dateStr}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    notifySuccess('Reporte Descargado', 'Se descargó el reporte de auditoría en formato CSV (compatible con Excel).');
+  }
+
+  // =========================================================
+  // Módulo: Validación SSCO (Sujetos Sin Capacidad Operativa)
+  // =========================================================
+  let currentSscoBook = 'RCE';
+  let currentSscoReport = null;
+  let currentSscoValidatedItems = [];
+  let currentSscoFilter = 'all'; // 'all', 'risk', 'ok'
+  let currentSscoSearchQuery = '';
+
+  function initValidateSscoEvents() {
+    const modal = $('modalValidarSsco');
+    if (!modal) return;
+
+    $('btnCerrarModalSscoCross')?.addEventListener('click', () => modal.close());
+    $('btnCancelarModalSsco')?.addEventListener('click', () => modal.close());
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.close();
+    });
+
+    // Filtros por píldoras
+    $('btnSscoFilterAll')?.addEventListener('click', () => setSscoFilter('all'));
+    $('btnSscoFilterRisk')?.addEventListener('click', () => setSscoFilter('risk'));
+    $('btnSscoFilterOk')?.addEventListener('click', () => setSscoFilter('ok'));
+
+    // Búsqueda
+    $('txtSscoSearch')?.addEventListener('input', (e) => {
+      currentSscoSearchQuery = (e.target.value || '').trim().toLowerCase();
+      renderSscoTableRows();
+    });
+
+    // Botones de acción
+    $('btnIniciarModalSsco')?.addEventListener('click', startSscoValidation);
+    $('btnActualizarPadronSsco')?.addEventListener('click', refreshSscoPadron);
+    $('btnExportarExcelSsco')?.addEventListener('click', exportSscoToExcel);
+  }
+
+  function setSscoFilter(filter) {
+    currentSscoFilter = filter;
+    $('btnSscoFilterAll')?.classList.toggle('active', filter === 'all');
+    $('btnSscoFilterRisk')?.classList.toggle('active', filter === 'risk');
+    $('btnSscoFilterOk')?.classList.toggle('active', filter === 'ok');
+    renderSscoTableRows();
+  }
+
+  function openValidateSscoModal(book) {
+    currentSscoBook = book || 'RCE';
+    if (currentSscoBook !== 'RCE') {
+      notifyWarning(
+        'Validación de Compras',
+        'La validación contra el padrón de SSCO (D.L. 1532) aplica a las COMPRAS (RCE), ya que afecta el crédito fiscal y la deducción de costos/gastos.'
+      );
+      return;
+    }
+
+    const allItems = currentProposalItemsRce;
+    if (!allItems || !allItems.length) {
+      notifyWarning(
+        'Sin Comprobantes',
+        'Primero debes generar y previsualizar la propuesta de Compras (RCE).'
+      );
+      return;
+    }
+
+    const modal = $('modalValidarSsco');
+    if (!modal) return;
+
+    // Configurar selector de alcance
+    $('sscoCountAll').textContent = allItems.length;
+    $('sscoScopeAll').checked = true;
+
+    const selectedCheckboxes = document.querySelectorAll('#proposalPreviewBodyRce .row-select:checked');
+    const lblSelected = $('lblSscoScopeSelected');
+    if (selectedCheckboxes.length > 0) {
+      lblSelected.style.display = 'inline-flex';
+      $('sscoCountSelected').textContent = selectedCheckboxes.length;
+    } else {
+      lblSelected.style.display = 'none';
+    }
+
+    // Resetear métricas a 0
+    currentSscoReport = null;
+    currentSscoValidatedItems = [];
+    currentSscoFilter = 'all';
+    currentSscoSearchQuery = '';
+    if ($('txtSscoSearch')) $('txtSscoSearch').value = '';
+    setSscoFilter('all');
+
+    $('sscoMetricTotal').textContent = '0';
+    $('sscoMetricCritico').textContent = '0';
+    $('sscoMetricWarning').textContent = '0';
+    $('sscoMetricOk').textContent = '0';
+    $('sscoMetricIgvRiesgo').textContent = 'S/ 0.00';
+
+    $('sscoPillCountAll').textContent = '0';
+    $('sscoPillCountRisk').textContent = '0';
+    $('sscoPillCountOk').textContent = '0';
+
+    $('btnExportarExcelSsco').style.display = 'none';
+    const btnIniciar = $('btnIniciarModalSsco');
+    if (btnIniciar) {
+      btnIniciar.disabled = false;
+      const btnText = btnIniciar.querySelector('.btn-text');
+      if (btnText) btnText.textContent = 'Iniciar Validación SSCO';
+    }
+    $('spinnerModalSsco').style.display = 'none';
+
+    $('sscoFooterSummary').textContent = `${allItems.length} comprobante(s) listos para auditar contra padrón SUNAT.`;
+
+    const tbody = $('tbodyValidarSsco');
+    if (tbody) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="10" style="text-align:center; padding: 36px; color: var(--notion-text-subtle);">
+            Haga clic en <strong>"Iniciar Validación SSCO"</strong> para cruzar sus compras con el padrón oficial.
+          </td>
+        </tr>
+      `;
+    }
+
+    modal.showModal();
+  }
+
+  async function refreshSscoPadron() {
+    const btn = $('btnActualizarPadronSsco');
+    const statusText = $('sscoPadronStatusText');
+    if (!btn) return;
+
+    btn.disabled = true;
+    const origHTML = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner" style="display:inline-block; margin-right:4px;"></span> Actualizando...';
+
+    try {
+      const res = await apiFetch('/api/sire/ssco/refresh', { method: 'POST' });
+      if (!res.ok) {
+        let errMsg = `Error en servidor (${res.status})`;
+        try {
+          const errData = await res.json();
+          if (errData && errData.error) errMsg = errData.error;
+        } catch (_) {}
+        throw new Error(errMsg);
+      }
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || 'Error al actualizar padrón');
+
+      if (statusText) {
+        statusText.innerHTML = `Sujetos registrados: <strong>${(data.total_sujetos || 0).toLocaleString()}</strong> | Actualizado al: <strong>${data.fecha_actualizacion || 'Reciente'}</strong> ${data.desde_cache ? '<em>(Copia local)</em>' : ''}`;
+      }
+      notifySuccess('Padrón Actualizado', `Se sincronizó el padrón oficial de SUNAT con ${(data.total_sujetos || 0).toLocaleString()} sujetos.`);
+    } catch (err) {
+      notifyError('Actualización Fallida', err.message);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = origHTML;
+    }
+  }
+
+  async function startSscoValidation() {
+    const allItems = currentProposalItemsRce;
+    if (!allItems || !allItems.length) return;
+
+    let targetItems = allItems;
+    const isSelectedScope = $('sscoScopeSelected')?.checked;
+    if (isSelectedScope) {
+      const selectedCheckboxes = document.querySelectorAll('#proposalPreviewBodyRce .row-select:checked');
+      const selectedIndices = new Set(Array.from(selectedCheckboxes).map((cb) => parseInt(cb.dataset.index, 10)));
+      targetItems = allItems.filter((_, idx) => selectedIndices.has(idx));
+    }
+
+    if (!targetItems.length) {
+      notifyWarning('Sin Comprobantes', 'No hay comprobantes seleccionados para validar.');
+      return;
+    }
+
+    const btnIniciar = $('btnIniciarModalSsco');
+    const spinner = $('spinnerModalSsco');
+    const footerSummary = $('sscoFooterSummary');
+    const tbody = $('tbodyValidarSsco');
+
+    btnIniciar.disabled = true;
+    spinner.style.display = 'inline-block';
+    const btnText = btnIniciar.querySelector('.btn-text');
+    if (btnText) btnText.textContent = 'Auditando compras...';
+    footerSummary.textContent = `Cruzando ${targetItems.length} comprobante(s) contra el padrón oficial SSCO...`;
+
+    if (tbody) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="10" style="text-align:center; padding: 36px; color: var(--notion-text-muted);">
+            <span class="spinner" style="display:inline-block; margin-right:8px;"></span>
+            Descargando y cruzando compras con el Padrón Oficial SSCO de SUNAT...
+          </td>
+        </tr>
+      `;
+    }
+
+    try {
+      const res = await apiFetch('/api/sire/validate-ssco', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          book: 'RCE',
+          items: targetItems
+        })
+      });
+
+      if (!res.ok) {
+        let errMsg = `Error en servidor (${res.status})`;
+        try {
+          const errData = await res.json();
+          if (errData && errData.error) errMsg = errData.error;
+          else if (errData && errData.message) errMsg = errData.message;
+        } catch (_) {
+          if (res.status === 404) {
+            errMsg = 'El servicio de validación SSCO no está disponible en este servidor. Por favor reinicie el servidor appsire-server.exe.';
+          }
+        }
+        throw new Error(errMsg);
+      }
+
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || 'Error al procesar validación SSCO');
+      }
+
+      currentSscoReport = data.report;
+      currentSscoValidatedItems = (data.report && data.report.items) || [];
+
+      // Actualizar contadores métricos
+      $('sscoMetricTotal').textContent = currentSscoReport.total_items || 0;
+      $('sscoMetricCritico').textContent = currentSscoReport.count_ssco || 0;
+      $('sscoMetricWarning').textContent = currentSscoReport.count_warning || 0;
+      $('sscoMetricOk').textContent = currentSscoReport.count_ok || 0;
+      $('sscoMetricIgvRiesgo').textContent = `S/ ${(currentSscoReport.total_igv_riesgo || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+      const totalRisk = (currentSscoReport.count_ssco || 0) + (currentSscoReport.count_warning || 0);
+      $('sscoPillCountAll').textContent = currentSscoReport.total_items || 0;
+      $('sscoPillCountRisk').textContent = totalRisk;
+      $('sscoPillCountOk').textContent = currentSscoReport.count_ok || 0;
+
+      // Actualizar barra de estado del padrón
+      const statusText = $('sscoPadronStatusText');
+      if (statusText) {
+        statusText.innerHTML = `Sujetos registrados: <strong>${(currentSscoReport.padron_total || 0).toLocaleString()}</strong> | Actualizado al: <strong>${currentSscoReport.padron_fecha || 'Reciente'}</strong> ${currentSscoReport.desde_cache ? '<em>(Copia local)</em>' : ''}`;
+      }
+
+      // Renderizar tabla
+      renderSscoTableRows();
+
+      // Botón exportar
+      $('btnExportarExcelSsco').style.display = 'inline-flex';
+
+      if (totalRisk > 0) {
+        footerSummary.innerHTML = `<span style="color:#b91c1c; font-weight:600;">⚠️ ALERTA: Se detectaron ${currentSscoReport.count_ssco} comprobante(s) con pérdida de crédito fiscal y ${currentSscoReport.count_warning} por revisar.</span>`;
+        notifyWarning(
+          'Riesgo Fiscal SSCO Detectado',
+          `Se detectaron ${currentSscoReport.count_ssco} comprobante(s) de Sujetos Sin Capacidad Operativa con S/ ${currentSscoReport.total_igv_riesgo.toFixed(2)} de crédito fiscal en riesgo (D.L. 1532).`
+        );
+      } else {
+        footerSummary.innerHTML = `<span style="color:#047857; font-weight:600;">✓ Conforme: Ningún proveedor auditado figura en el padrón de SSCO.</span>`;
+        notifySuccess('Auditoría Conforme', 'Ninguno de sus proveedores de compras figura como Sujeto Sin Capacidad Operativa.');
+      }
+
+    } catch (err) {
+      notifyError('Error de Validación', err.message);
+      footerSummary.textContent = `Error: ${err.message}`;
+      if (tbody) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="10" style="text-align:center; padding: 36px; color: var(--danger);">
+              ${escapeHtml(err.message)}
+            </td>
+          </tr>
+        `;
+      }
+    } finally {
+      btnIniciar.disabled = false;
+      spinner.style.display = 'none';
+      if (btnText) btnText.textContent = 'Iniciar Validación SSCO';
+    }
+  }
+
+  function renderSscoTableRows() {
+    const tbody = $('tbodyValidarSsco');
+    if (!tbody) return;
+
+    if (!currentSscoValidatedItems.length) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="10" style="text-align:center; padding: 36px; color: var(--notion-text-subtle);">
+            No hay resultados disponibles.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    let filtered = currentSscoValidatedItems;
+    if (currentSscoFilter === 'risk') {
+      filtered = filtered.filter((it) => it.riesgo === 'CRITICAL' || it.riesgo === 'WARNING');
+    } else if (currentSscoFilter === 'ok') {
+      filtered = filtered.filter((it) => it.riesgo === 'OK');
+    }
+
+    if (currentSscoSearchQuery) {
+      const q = currentSscoSearchQuery;
+      filtered = filtered.filter((it) =>
+        (it.ruc && it.ruc.toLowerCase().includes(q)) ||
+        (it.razon_social && it.razon_social.toLowerCase().includes(q)) ||
+        (it.serie && it.serie.toLowerCase().includes(q)) ||
+        (it.numero && it.numero.toLowerCase().includes(q)) ||
+        (it.resolucion && it.resolucion.toLowerCase().includes(q))
+      );
+    }
+
+    if (!filtered.length) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="10" style="text-align:center; padding: 32px; color: var(--notion-text-muted);">
+            No se encontraron comprobantes que coincidan con el filtro actual.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map((it, idx) => {
+      let badgeHtml = '';
+      let rowClass = '';
+      if (it.riesgo === 'CRITICAL') {
+        badgeHtml = '<span class="ssco-badge ssco-badge-critico">⚠️ SIN CAPACIDAD</span>';
+        rowClass = 'row-ssco-critical';
+      } else if (it.riesgo === 'WARNING') {
+        badgeHtml = '<span class="ssco-badge ssco-badge-warning">🔍 REVISAR NOMBRE</span>';
+        rowClass = 'row-ssco-warning';
+      } else {
+        badgeHtml = '<span class="ssco-badge ssco-badge-ok">✓ NO REGISTRADO</span>';
+      }
+
+      const compLabel = (it.serie && it.numero) ? `${it.serie}-${it.numero}` : (it.comp_pago || '—');
+      const fmtMonto = (it.importe_total || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const fmtIgv = (it.igv || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const igvColor = it.riesgo === 'CRITICAL' ? 'color:#b91c1c; font-weight:700;' : '';
+
+      return `
+        <tr class="${rowClass}">
+          <td style="text-align:center; color: var(--notion-text-subtle);">${idx + 1}</td>
+          <td><strong>${escapeHtml(compLabel)}</strong></td>
+          <td style="text-align:center;">${escapeHtml(it.fecha || '—')}</td>
+          <td><span class="font-mono" style="font-weight:600;">${escapeHtml(it.ruc || '—')}</span></td>
+          <td><span title="${escapeHtml(it.razon_social || '')}">${escapeHtml(it.razon_social || '—')}</span></td>
+          <td style="text-align:right; font-family:var(--font-mono);">S/ ${fmtMonto}</td>
+          <td style="text-align:right; font-family:var(--font-mono); ${igvColor}">S/ ${fmtIgv}</td>
+          <td style="text-align:center;">${badgeHtml}</td>
+          <td style="text-align:center;"><span class="notion-tag">${escapeHtml(it.coincide_por || '-')}</span></td>
+          <td style="font-size:0.75rem; color: ${it.riesgo === 'CRITICAL' ? '#b91c1c' : 'var(--notion-text-muted)'};">
+            ${escapeHtml(it.detalle || '—')}
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function exportSscoToExcel() {
+    if (!currentSscoValidatedItems.length) {
+      notifyWarning('Sin Datos', 'No hay resultados auditados para exportar.');
+      return;
+    }
+
+    const headers = [
+      'N°',
+      'Comprobante',
+      'Fecha Emisión',
+      'RUC Proveedor',
+      'Razón Social Proveedor',
+      'Importe Total',
+      'IGV (Crédito Fiscal)',
+      'Estado SSCO',
+      'Coincide Por',
+      'Resolución SUNAT',
+      'Fecha Firme',
+      'Fecha Publicación',
+      'Detalle',
+      'Riesgo Fiscal'
+    ];
+
+    const rows = currentSscoValidatedItems.map((it, idx) => [
+      idx + 1,
+      `"${it.serie ? it.serie + '-' + it.numero : it.comp_pago || ''}"`,
+      it.fecha || '',
+      `="${it.ruc || ''}"`,
+      `"${(it.razon_social || '').replace(/"/g, '""')}"`,
+      (it.importe_total || 0).toFixed(2),
+      (it.igv || 0).toFixed(2),
+      it.estado || '',
+      it.coincide_por || '',
+      `"${(it.resolucion || '').replace(/"/g, '""')}"`,
+      it.fecha_firme || '',
+      it.fecha_publicacion || '',
+      `"${(it.detalle || '').replace(/"/g, '""')}"`,
+      it.riesgo || 'OK'
+    ]);
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+    a.download = `Auditoria_SSCO_Compras_RCE_${dateStr}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    notifySuccess('Reporte Descargado', 'Se descargó el reporte de auditoría SSCO en formato compatible con Excel.');
+  }
+
+  // =========================================================
+  // Módulo: Cuadre de Importes (Compras RCE / Ventas RVIE)
+  // =========================================================
+  let currentCuadreBook = 'RCE';
+  let currentCuadreReport = null;
+  let currentCuadreItems = [];
+  let currentCuadreFilter = 'all'; // 'all', 'exceso', 'defecto'
+  let currentCuadreSearchQuery = '';
+  let currentCuadreGlobalCol = 'bi_gravada';
+
+  function initCuadreEvents() {
+    const modal = $('modalCuadrarImportes');
+    if (!modal) return;
+
+    $('btnCerrarModalCuadreCross')?.addEventListener('click', () => modal.close());
+    $('btnCancelarModalCuadre')?.addEventListener('click', () => modal.close());
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.close();
+    });
+
+    // Selector global de columna
+    $('cboCuadreGlobalCol')?.addEventListener('change', (e) => {
+      currentCuadreGlobalCol = e.target.value;
+    });
+
+    $('btnCuadreAplicarGlobal')?.addEventListener('click', () => {
+      const selCol = $('cboCuadreGlobalCol')?.value || 'bi_gravada';
+      currentCuadreGlobalCol = selCol;
+      for (const it of currentCuadreItems) {
+        recalculateCuadreItem(it, selCol);
+      }
+      renderCuadreRows();
+      notifySuccess('Columna Aplicada', `Se asignó la columna "${selCol}" como objetivo de ajuste para todas las filas.`);
+    });
+
+    // Píldoras de filtro
+    $('btnCuadreFilterAll')?.addEventListener('click', () => setCuadreFilter('all'));
+    $('btnCuadreFilterExceso')?.addEventListener('click', () => setCuadreFilter('exceso'));
+    $('btnCuadreFilterDefecto')?.addEventListener('click', () => setCuadreFilter('defecto'));
+
+    // Búsqueda
+    $('txtCuadreSearch')?.addEventListener('input', (e) => {
+      currentCuadreSearchQuery = (e.target.value || '').trim().toLowerCase();
+      renderCuadreRows();
+    });
+
+    // Acciones principales
+    $('btnAplicarModalCuadre')?.addEventListener('click', applyCuadreAdjustments);
+    $('btnExportarExcelCuadre')?.addEventListener('click', exportCuadreToExcel);
+
+    // Cambio de columna en fila individual (delegado en tbody)
+    $('tbodyCuadrarImportes')?.addEventListener('change', (e) => {
+      const select = e.target.closest('.cuadre-row-select');
+      if (!select) return;
+      const rowIdx = parseInt(select.dataset.cuadreIndex, 10);
+      const it = currentCuadreItems[rowIdx];
+      if (!it) return;
+      const newCol = select.value;
+      recalculateCuadreItem(it, newCol);
+
+      // Actualizar visualmente la celda de Antes -> Ajustado sin re-renderizar toda la tabla
+      const cellPreview = document.getElementById(`cuadrePreview_${rowIdx}`);
+      if (cellPreview) {
+        cellPreview.innerHTML = `<span class="cuadre-val-prev">${it.valor_actual.toFixed(2)}</span> &rarr; <strong class="cuadre-val-next">${it.valor_ajustado.toFixed(2)}</strong>`;
+      }
+    });
+  }
+
+  function setCuadreFilter(filter) {
+    currentCuadreFilter = filter;
+    $('btnCuadreFilterAll')?.classList.toggle('active', filter === 'all');
+    $('btnCuadreFilterExceso')?.classList.toggle('active', filter === 'exceso');
+    $('btnCuadreFilterDefecto')?.classList.toggle('active', filter === 'defecto');
+    renderCuadreRows();
+  }
+
+  function recalculateCuadreItem(it, colId) {
+    const isRce = currentCuadreBook === 'RCE';
+    const allItems = isRce ? currentProposalItemsRce : currentProposalItemsRvie;
+    const orig = allItems[it.index];
+    if (!orig) return;
+
+    let currentVal = 0;
+    if (colId === 'bi_gravada') currentVal = parseFloat(orig.bi_gravada || 0) || 0;
+    else if (colId === 'igv') currentVal = parseFloat(orig.igv || 0) || 0;
+    else if (colId === 'adq_no_gravada') currentVal = parseFloat(orig.adq_no_gravada || 0) || 0;
+    else if (colId === 'bi_grav_y_no_grav') currentVal = parseFloat(orig.bi_grav_y_no_grav || 0) || 0;
+    else if (colId === 'bi_no_gravada') currentVal = parseFloat(orig.bi_no_gravada || 0) || 0;
+    else if (colId === 'otros_conceptos') currentVal = parseFloat(orig.otros_conceptos || 0) || 0;
+    else currentVal = parseFloat(orig.bi_gravada || 0) || 0;
+
+    const dif = it.diferencia;
+    const newVal = Math.round((currentVal + dif) * 100) / 100;
+
+    it.columna_ajuste = colId;
+    it.valor_actual = currentVal;
+    it.valor_ajustado = newVal;
+
+    const cloned = { ...orig };
+    if (colId === 'bi_gravada') cloned.bi_gravada = newVal.toFixed(2);
+    else if (colId === 'igv') cloned.igv = newVal.toFixed(2);
+    else if (colId === 'adq_no_gravada') cloned.adq_no_gravada = newVal.toFixed(2);
+    else if (colId === 'bi_grav_y_no_grav') cloned.bi_grav_y_no_grav = newVal.toFixed(2);
+    else if (colId === 'bi_no_gravada') cloned.bi_no_gravada = newVal.toFixed(2);
+    else if (colId === 'otros_conceptos') cloned.otros_conceptos = newVal.toFixed(2);
+    else cloned.bi_gravada = newVal.toFixed(2);
+
+    it.item_recalculado = cloned;
+  }
+
+  async function openCuadreModal(book) {
+    currentCuadreBook = book || 'RCE';
+    const isRce = currentCuadreBook === 'RCE';
+    const allItems = isRce ? currentProposalItemsRce : currentProposalItemsRvie;
+
+    if (!allItems || !allItems.length) {
+      notifyWarning(
+        'Sin Comprobantes',
+        `Primero debes generar y previsualizar la propuesta de ${isRce ? 'Compras (RCE)' : 'Ventas (RVIE)'}.`
+      );
+      return;
+    }
+
+    const modal = $('modalCuadrarImportes');
+    if (!modal) return;
+
+    // Configurar título y subtítulo
+    const titleEl = $('modalCuadrarImportesTitle');
+    if (titleEl) titleEl.textContent = `Cuadre de Importes - ${isRce ? 'Compras (RCE)' : 'Ventas (RVIE)'}`;
+
+    // Resetear estado
+    currentCuadreReport = null;
+    currentCuadreItems = [];
+    currentCuadreFilter = 'all';
+    currentCuadreSearchQuery = '';
+    if ($('txtCuadreSearch')) $('txtCuadreSearch').value = '';
+    setCuadreFilter('all');
+
+    $('cuadreMetricDescuadres').textContent = '0';
+    $('cuadreMetricDiferenciaNeta').textContent = 'S/ 0.00';
+    $('cuadreMetricExceso').textContent = '0';
+    $('cuadreMetricDefecto').textContent = '0';
+
+    $('cuadrePillCountAll').textContent = '0';
+    $('cuadrePillCountExceso').textContent = '0';
+    $('cuadrePillCountDefecto').textContent = '0';
+
+    $('btnExportarExcelCuadre').style.display = 'none';
+    const btnAplicar = $('btnAplicarModalCuadre');
+    if (btnAplicar) {
+      btnAplicar.disabled = true;
+      const btnText = btnAplicar.querySelector('.btn-text');
+      if (btnText) btnText.textContent = 'Cuadrar y Aplicar Ajustes';
+    }
+    $('spinnerModalCuadre').style.display = 'none';
+
+    const tbody = $('tbodyCuadrarImportes');
+    if (tbody) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="9" style="text-align:center; padding: 36px; color: var(--notion-text-subtle);">
+            <div class="spinner" style="display:inline-block; margin-right:8px; vertical-align:middle;"></div>
+            Analizando consistencia de importes en ${allItems.length} comprobante(s)...
+          </td>
+        </tr>
+      `;
+    }
+
+    $('cuadreFooterSummary').textContent = `Verificando ${allItems.length} comprobante(s)...`;
+    modal.showModal();
+
+    try {
+      const res = await apiFetch('/api/sire/cuadre/detect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ book: currentCuadreBook, items: allItems })
+      });
+
+      if (!res.ok) {
+        let errMsg = `Error en servidor (${res.status})`;
+        try {
+          const errData = await res.json();
+          if (errData && errData.error) errMsg = errData.error;
+        } catch (_) {
+          if (res.status === 404) {
+            errMsg = 'El servicio de cuadre de importes no está disponible. Por favor reinicie el servidor appsire-server.exe.';
+          }
+        }
+        throw new Error(errMsg);
+      }
+
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || 'Error al analizar cuadre de importes');
+      }
+
+      currentCuadreReport = data.report;
+      currentCuadreItems = (data.report && data.report.items) ? data.report.items.map(it => ({ ...it })) : [];
+      currentCuadreGlobalCol = data.report.columna_default || 'bi_gravada';
+
+      // Poblar selector global de columnas
+      const cboGlobal = $('cboCuadreGlobalCol');
+      if (cboGlobal && data.report.columnas_disponibles) {
+        cboGlobal.innerHTML = data.report.columnas_disponibles
+          .map(c => `<option value="${escapeHtml(c.id)}" ${c.id === currentCuadreGlobalCol ? 'selected' : ''}>${escapeHtml(c.nombre)}</option>`)
+          .join('');
+      }
+
+      // Actualizar contadores métricos
+      $('cuadreMetricDescuadres').textContent = currentCuadreReport.total_descuadres || 0;
+      $('cuadreMetricDiferenciaNeta').textContent = `S/ ${(currentCuadreReport.diferencia_neta || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      $('cuadreMetricExceso').textContent = currentCuadreReport.total_por_exceso || 0;
+      $('cuadreMetricDefecto').textContent = currentCuadreReport.total_por_defecto || 0;
+
+      $('cuadrePillCountAll').textContent = currentCuadreReport.total_descuadres || 0;
+      $('cuadrePillCountExceso').textContent = currentCuadreReport.total_por_exceso || 0;
+      $('cuadrePillCountDefecto').textContent = currentCuadreReport.total_por_defecto || 0;
+
+      if (currentCuadreReport.total_descuadres === 0) {
+        if (tbody) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="9" style="text-align:center; padding: 48px 20px; color: #047857;">
+                <div style="font-size: 24px; margin-bottom: 8px;">✓</div>
+                <div style="font-size: 14px; font-weight: 600;">Todos los importes están cuadrados</div>
+                <div style="font-size: 12px; color: var(--notion-text-subtle); margin-top: 4px;">
+                  Los ${allItems.length} comprobante(s) coinciden exactamente entre su Importe Total y la suma de sus componentes.
+                </div>
+              </td>
+            </tr>
+          `;
+        }
+        $('cuadreFooterSummary').innerHTML = `<span style="color:#047857; font-weight:600;">✓ Conforme: Todos los comprobantes (${allItems.length}) cuadran al 100%.</span>`;
+        notifySuccess('Importes Cuadrados', 'Todos los comprobantes de la propuesta cuadran exactamente.');
+      } else {
+        renderCuadreRows();
+        $('btnExportarExcelCuadre').style.display = 'inline-flex';
+        btnAplicar.disabled = false;
+        $('cuadreFooterSummary').innerHTML = `<span style="color:#b91c1c; font-weight:600;">⚠ Se detectaron ${currentCuadreReport.total_descuadres} comprobante(s) descuadrado(s) por un neto de S/ ${(currentCuadreReport.diferencia_neta || 0).toFixed(2)}.</span>`;
+        notifyWarning(
+          'Descuadre Detectado',
+          `Se detectaron ${currentCuadreReport.total_descuadres} comprobante(s) con diferencias aritméticas respecto a su Importe Total.`
+        );
+      }
+    } catch (err) {
+      if (tbody) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="9" style="text-align:center; padding: 36px; color: #b91c1c;">
+              Error al analizar consistencia: ${escapeHtml(err.message)}
+            </td>
+          </tr>
+        `;
+      }
+      notifyError('Error en Cuadre', err.message);
+    }
+  }
+
+  function renderCuadreRows() {
+    const tbody = $('tbodyCuadrarImportes');
+    if (!tbody) return;
+
+    if (!currentCuadreItems.length) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="9" style="text-align:center; padding: 36px; color: var(--notion-text-subtle);">
+            No hay comprobantes descuadrados.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    let filtered = currentCuadreItems;
+    if (currentCuadreFilter === 'exceso') {
+      filtered = filtered.filter(it => it.diferencia > 0);
+    } else if (currentCuadreFilter === 'defecto') {
+      filtered = filtered.filter(it => it.diferencia < 0);
+    }
+
+    if (currentCuadreSearchQuery) {
+      const q = currentCuadreSearchQuery;
+      filtered = filtered.filter(it =>
+        (it.ruc && it.ruc.toLowerCase().includes(q)) ||
+        (it.razon_social && it.razon_social.toLowerCase().includes(q)) ||
+        (it.serie && it.serie.toLowerCase().includes(q)) ||
+        (it.numero && it.numero.toLowerCase().includes(q)) ||
+        (it.comp_pago && it.comp_pago.toLowerCase().includes(q))
+      );
+    }
+
+    if (!filtered.length) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="9" style="text-align:center; padding: 36px; color: var(--notion-text-subtle);">
+            No hay comprobantes que coincidan con los filtros aplicados.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    const cols = currentCuadreReport?.columnas_disponibles || [
+      { id: 'bi_gravada', nombre: 'Base Imponible Gravada' }
+    ];
+
+    tbody.innerHTML = filtered.map((it) => {
+      // Encontrar el índice original en currentCuadreItems
+      const origItemIdx = currentCuadreItems.findIndex(x => x.index === it.index);
+      const isExceso = it.diferencia > 0;
+      const diffSign = isExceso ? `+${it.diferencia.toFixed(2)}` : it.diferencia.toFixed(2);
+      const diffBadge = isExceso
+        ? `<span class="cuadre-badge cuadre-diff-exceso">${diffSign}</span>`
+        : `<span class="cuadre-badge cuadre-diff-defecto">${diffSign}</span>`;
+
+      const optionsHtml = cols.map(c =>
+        `<option value="${escapeHtml(c.id)}" ${c.id === it.columna_ajuste ? 'selected' : ''}>${escapeHtml(c.nombre)}</option>`
+      ).join('');
+
+      return `
+        <tr>
+          <td style="text-align: center; color: var(--notion-text-subtle);">${origItemIdx + 1}</td>
+          <td>
+            <div style="display: flex; align-items: center; gap: 4px;">
+              <span class="cpe-tipo-tag">${escapeHtml(it.tipo || '01')}</span>
+              <strong>${escapeHtml(it.serie ? `${it.serie}-${it.numero}` : it.comp_pago || '-')}</strong>
+            </div>
+          </td>
+          <td style="text-align: center;">${escapeHtml(it.fecha || '-')}</td>
+          <td>
+            <div style="font-weight: 500; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(it.razon_social)}">
+              ${escapeHtml(it.razon_social || '-')}
+            </div>
+            <div style="font-size: 11px; color: var(--notion-text-subtle); font-family: monospace;">
+              RUC: ${escapeHtml(it.ruc || '-')}
+            </div>
+          </td>
+          <td style="text-align: right; font-family: monospace;">S/ ${(it.suma_componentes || 0).toFixed(2)}</td>
+          <td style="text-align: right; font-family: monospace; font-weight: 600;">S/ ${(it.importe_total || 0).toFixed(2)}</td>
+          <td style="text-align: center;">${diffBadge}</td>
+          <td>
+            <select class="form-control form-control-sm cuadre-row-select" data-cuadre-index="${origItemIdx}">
+              ${optionsHtml}
+            </select>
+          </td>
+          <td style="text-align: right; font-family: monospace;" id="cuadrePreview_${origItemIdx}">
+            <span class="cuadre-val-prev">${(it.valor_actual || 0).toFixed(2)}</span> &rarr; <strong class="cuadre-val-next">${(it.valor_ajustado || 0).toFixed(2)}</strong>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  async function applyCuadreAdjustments() {
+    if (!currentCuadreItems || !currentCuadreItems.length) return;
+
+    const count = currentCuadreItems.length;
+    const isRce = currentCuadreBook === 'RCE';
+    const confirmed = await notifyConfirm(
+      '¿Cuadrar Importes?',
+      `Se actualizarán los montos de ${count} comprobante(s) en la propuesta de ${isRce ? 'Compras (RCE)' : 'Ventas (RVIE)'}. La columna seleccionada absorberá la diferencia de redondeo y el Importe Total se mantendrá intacto.`,
+      'Sí, aplicar cuadre'
+    );
+    if (!confirmed) return;
+
+    const allItems = isRce ? currentProposalItemsRce : currentProposalItemsRvie;
+    let applied = 0;
+
+    for (const it of currentCuadreItems) {
+      if (it.index >= 0 && it.index < allItems.length) {
+        allItems[it.index] = it.item_recalculado;
+        applied++;
+      }
+    }
+
+    // Re-renderizar la grilla de propuesta en pantalla
+    renderProposalTableGrid(isRce, allItems);
+
+    // Cerrar modal
+    $('modalCuadrarImportes')?.close();
+
+    notifySuccess(
+      'Importes Cuadrados',
+      `Se cuadraron exitosamente ${applied} comprobante(s) en la propuesta activa.`
+    );
+  }
+
+  function exportCuadreToExcel() {
+    if (!currentCuadreItems.length) {
+      notifyWarning('Sin Datos', 'No hay comprobantes descuadrados para exportar.');
+      return;
+    }
+
+    const colNames = {};
+    (currentCuadreReport?.columnas_disponibles || []).forEach(c => colNames[c.id] = c.nombre);
+
+    const headers = [
+      'N°',
+      'Comprobante',
+      'Tipo',
+      'Serie',
+      'Número',
+      'Fecha Emisión',
+      'RUC',
+      'Razón Social',
+      'Suma Componentes',
+      'Importe Total',
+      'Diferencia',
+      'Tipo Descuadre',
+      'Columna Ajustada',
+      'Valor Anterior',
+      'Valor Ajustado'
+    ];
+
+    const rows = currentCuadreItems.map((it, idx) => [
+      idx + 1,
+      `"${it.serie ? it.serie + '-' + it.numero : it.comp_pago || ''}"`,
+      it.tipo || '',
+      it.serie || '',
+      it.numero || '',
+      it.fecha || '',
+      `="${it.ruc || ''}"`,
+      `"${(it.razon_social || '').replace(/"/g, '""')}"`,
+      (it.suma_componentes || 0).toFixed(2),
+      (it.importe_total || 0).toFixed(2),
+      (it.diferencia || 0).toFixed(2),
+      it.diferencia > 0 ? 'Exceso (+)' : 'Defecto (-)',
+      `"${colNames[it.columna_ajuste] || it.columna_ajuste}"`,
+      (it.valor_actual || 0).toFixed(2),
+      (it.valor_ajustado || 0).toFixed(2)
+    ]);
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+    a.download = `Cuadre_Importes_${currentCuadreBook}_${dateStr}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    notifySuccess('Reporte Descargado', 'Se descargó el reporte de cuadre de importes en formato compatible con Excel.');
+  }
+
+  // =========================================================
+  // Módulo: Validación de Correlativos RVIE (SIRE)
+  // =========================================================
+  let currentCorrelReport = null;
+  let currentCorrelItems = [];
+  let currentCorrelSelectedIndices = new Set();
+  let currentCorrelSerieFilter = 'all';
+  let currentCorrelSearchQuery = '';
+
+  function initCorrelEvents() {
+    const modal = $('modalValidarCorrelativos');
+    if (!modal) return;
+
+    $('btnCerrarModalCorrelCross')?.addEventListener('click', () => modal.close());
+    $('btnCancelarModalCorrel')?.addEventListener('click', () => modal.close());
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.close();
+    });
+
+    // Filtro por serie
+    $('cboCorrelSerieFilter')?.addEventListener('change', (e) => {
+      currentCorrelSerieFilter = e.target.value;
+      renderCorrelRows();
+    });
+
+    // Marcar / Desmarcar todos
+    $('btnCorrelMarcarTodos')?.addEventListener('click', () => {
+      currentCorrelSelectedIndices = new Set(currentCorrelItems.map((_, i) => i));
+      updateCorrelCheckboxesUI();
+    });
+
+    $('btnCorrelDesmarcarTodos')?.addEventListener('click', () => {
+      currentCorrelSelectedIndices.clear();
+      updateCorrelCheckboxesUI();
+    });
+
+    // Master check
+    $('correlMasterCheck')?.addEventListener('change', (e) => {
+      const checked = e.target.checked;
+      const visibleCheckboxes = document.querySelectorAll('#tbodyCorrelativos .correl-item-check');
+      visibleCheckboxes.forEach((cb) => {
+        const idx = parseInt(cb.dataset.correlIndex, 10);
+        cb.checked = checked;
+        if (checked) currentCorrelSelectedIndices.add(idx);
+        else currentCorrelSelectedIndices.delete(idx);
+      });
+      updateCorrelButtonState();
+    });
+
+    // Check individual (delegado)
+    $('tbodyCorrelativos')?.addEventListener('change', (e) => {
+      if (!e.target.classList.contains('correl-item-check')) return;
+      const idx = parseInt(e.target.dataset.correlIndex, 10);
+      if (e.target.checked) currentCorrelSelectedIndices.add(idx);
+      else currentCorrelSelectedIndices.delete(idx);
+
+      // Actualizar master check
+      const masterCheck = $('correlMasterCheck');
+      const visibleCheckboxes = document.querySelectorAll('#tbodyCorrelativos .correl-item-check');
+      if (masterCheck && visibleCheckboxes.length > 0) {
+        masterCheck.checked = Array.from(visibleCheckboxes).every((cb) => cb.checked);
+      }
+      updateCorrelButtonState();
+    });
+
+    // Búsqueda
+    $('txtCorrelSearch')?.addEventListener('input', (e) => {
+      currentCorrelSearchQuery = (e.target.value || '').trim().toLowerCase();
+      renderCorrelRows();
+    });
+
+    // Acciones principales
+    $('btnCompletarModalCorrel')?.addEventListener('click', completeCorrelAsAnulado);
+    $('btnExportarExcelCorrel')?.addEventListener('click', exportCorrelToExcel);
+  }
+
+  function updateCorrelCheckboxesUI() {
+    const visibleCheckboxes = document.querySelectorAll('#tbodyCorrelativos .correl-item-check');
+    visibleCheckboxes.forEach((cb) => {
+      const idx = parseInt(cb.dataset.correlIndex, 10);
+      cb.checked = currentCorrelSelectedIndices.has(idx);
+    });
+    const masterCheck = $('correlMasterCheck');
+    if (masterCheck && visibleCheckboxes.length > 0) {
+      masterCheck.checked = Array.from(visibleCheckboxes).every((cb) => cb.checked);
+    }
+    updateCorrelButtonState();
+  }
+
+  function updateCorrelButtonState() {
+    const btn = $('btnCompletarModalCorrel');
+    if (!btn) return;
+    const count = currentCorrelSelectedIndices.size;
+    btn.disabled = count === 0;
+    const btnText = btn.querySelector('.btn-text');
+    if (btnText) {
+      btnText.textContent = count > 0
+        ? `Completar ${count} Seleccionado(s) como ANULADO`
+        : 'Completar Seleccionados como ANULADO';
+    }
+  }
+
+  async function openCorrelModal(book) {
+    if (book !== 'RVIE') {
+      notifyWarning(
+        'Validación de Ventas',
+        'La validación de correlativos aplica exclusivamente a las VENTAS (RVIE), donde la empresa emisora está obligada a declarar numeración correlativa estricta sin saltos.'
+      );
+      return;
+    }
+
+    const allItems = currentProposalItemsRvie;
+    if (!allItems || !allItems.length) {
+      notifyWarning(
+        'Sin Comprobantes',
+        'Primero debes generar y previsualizar la propuesta de Ventas (RVIE).'
+      );
+      return;
+    }
+
+    const modal = $('modalValidarCorrelativos');
+    if (!modal) return;
+
+    // Resetear estado
+    currentCorrelReport = null;
+    currentCorrelItems = [];
+    currentCorrelSelectedIndices = new Set();
+    currentCorrelSerieFilter = 'all';
+    currentCorrelSearchQuery = '';
+    if ($('txtCorrelSearch')) $('txtCorrelSearch').value = '';
+
+    $('correlMetricFaltantes').textContent = '0';
+    $('correlMetricSeries').textContent = '0';
+    $('correlMetricTotalSeries').textContent = '0';
+    $('correlMetricTotalDocs').textContent = '0';
+
+    $('btnExportarExcelCorrel').style.display = 'none';
+    const btnCompletar = $('btnCompletarModalCorrel');
+    if (btnCompletar) {
+      btnCompletar.disabled = true;
+      const btnText = btnCompletar.querySelector('.btn-text');
+      if (btnText) btnText.textContent = 'Completar Seleccionados como ANULADO';
+    }
+
+    const tbody = $('tbodyCorrelativos');
+    if (tbody) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="8" style="text-align:center; padding: 36px; color: var(--notion-text-subtle);">
+            <div class="spinner" style="display:inline-block; margin-right:8px; vertical-align:middle;"></div>
+            Analizando correlatividad de numeración en ${allItems.length} comprobante(s)...
+          </td>
+        </tr>
+      `;
+    }
+
+    $('correlFooterSummary').textContent = `Auditando ${allItems.length} comprobante(s) de Ventas (RVIE)...`;
+    modal.showModal();
+
+    try {
+      const res = await apiFetch('/api/sire/correlativos/detect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ book: 'RVIE', items: allItems })
+      });
+
+      if (!res.ok) {
+        let errMsg = `Error en servidor (${res.status})`;
+        try {
+          const errData = await res.json();
+          if (errData && errData.error) errMsg = errData.error;
+        } catch (_) {
+          if (res.status === 404) {
+            errMsg = 'El servicio de validación de correlativos no está disponible en este servidor. Por favor reinicie el servidor appsire-server.exe.';
+          }
+        }
+        throw new Error(errMsg);
+      }
+
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || 'Error al analizar correlativos');
+      }
+
+      currentCorrelReport = data.report;
+      currentCorrelItems = (data.report && data.report.faltantes) || [];
+      currentCorrelSelectedIndices = new Set(currentCorrelItems.map((_, i) => i));
+
+      // Actualizar contadores
+      $('correlMetricFaltantes').textContent = currentCorrelReport.total_faltantes || 0;
+      $('correlMetricSeries').textContent = currentCorrelReport.series_con_faltantes || 0;
+      $('correlMetricTotalSeries').textContent = currentCorrelReport.total_series || 0;
+      $('correlMetricTotalDocs').textContent = currentCorrelReport.total_documentos || 0;
+
+      // Poblar selector de series
+      const cboSeries = $('cboCorrelSerieFilter');
+      if (cboSeries) {
+        const seriesConHuecos = Array.from(new Set(currentCorrelItems.map(f => `${f.tipo} - ${f.serie}`))).sort();
+        let opts = `<option value="all">Todas las series (${currentCorrelReport.series_con_faltantes || 0} con huecos)</option>`;
+        seriesConHuecos.forEach(s => {
+          opts += `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`;
+        });
+        cboSeries.innerHTML = opts;
+      }
+
+      if (currentCorrelReport.total_faltantes === 0) {
+        if (tbody) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="8" style="text-align:center; padding: 48px 20px; color: #047857;">
+                <div style="font-size: 24px; margin-bottom: 8px;">✓</div>
+                <div style="font-size: 14px; font-weight: 600;">Sin huecos en la numeración</div>
+                <div style="font-size: 12px; color: var(--notion-text-subtle); margin-top: 4px;">
+                  Se revisaron ${currentCorrelReport.total_series} series (${currentCorrelReport.total_documentos} documentos). Todas las series son correlativas y continuas.
+                </div>
+              </td>
+            </tr>
+          `;
+        }
+        $('correlFooterSummary').innerHTML = `<span style="color:#047857; font-weight:600;">✓ Conforme: Ninguna serie de ventas presenta saltos de numeración.</span>`;
+        notifySuccess('Correlativos Conformes', 'Todas las series de ventas están correlativas y completas.');
+      } else {
+        renderCorrelRows();
+        $('btnExportarExcelCorrel').style.display = 'inline-flex';
+        updateCorrelButtonState();
+        $('correlFooterSummary').innerHTML = `<span style="color:#b91c1c; font-weight:600;">⚠ Se detectaron ${currentCorrelReport.total_faltantes} correlativo(s) faltante(s) en ${currentCorrelReport.series_con_faltantes} serie(s).</span>`;
+        notifyWarning(
+          'Saltos de Correlativo Detectados',
+          `Se detectaron ${currentCorrelReport.total_faltantes} comprobante(s) faltante(s) en la propuesta de Ventas. Puede completarlos como ANULADOS para evitar observaciones de SUNAT.`
+        );
+      }
+
+      if (currentCorrelReport.advertencias && currentCorrelReport.advertencias.length > 0) {
+        notifyWarning('Aviso de Correlativos', currentCorrelReport.advertencias.join(' '));
+      }
+    } catch (err) {
+      if (tbody) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="8" style="text-align:center; padding: 36px; color: #b91c1c;">
+              Error al analizar correlativos: ${escapeHtml(err.message)}
+            </td>
+          </tr>
+        `;
+      }
+      notifyError('Error en Correlativos', err.message);
+    }
+  }
+
+  function renderCorrelRows() {
+    const tbody = $('tbodyCorrelativos');
+    if (!tbody) return;
+
+    if (!currentCorrelItems.length) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="8" style="text-align:center; padding: 36px; color: var(--notion-text-subtle);">
+            No hay correlativos faltantes.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    let filtered = currentCorrelItems.map((item, originalIdx) => ({ item, originalIdx }));
+
+    if (currentCorrelSerieFilter !== 'all') {
+      filtered = filtered.filter(({ item }) => `${item.tipo} - ${item.serie}` === currentCorrelSerieFilter);
+    }
+
+    if (currentCorrelSearchQuery) {
+      const q = currentCorrelSearchQuery;
+      filtered = filtered.filter(({ item }) =>
+        (item.serie && item.serie.toLowerCase().includes(q)) ||
+        (item.numero && item.numero.toLowerCase().includes(q)) ||
+        (item.tipo && item.tipo.toLowerCase().includes(q))
+      );
+    }
+
+    if (!filtered.length) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="8" style="text-align:center; padding: 36px; color: var(--notion-text-subtle);">
+            No hay correlativos faltantes que coincidan con los filtros aplicados.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(({ item, originalIdx }, rowNum) => {
+      const isChecked = currentCorrelSelectedIndices.has(originalIdx);
+      return `
+        <tr>
+          <td style="text-align: center;">
+            <input type="checkbox" class="tc-item-check correl-item-check" data-correl-index="${originalIdx}" ${isChecked ? 'checked' : ''}>
+          </td>
+          <td style="text-align: center; color: var(--notion-text-subtle);">${rowNum + 1}</td>
+          <td>
+            <span class="cpe-tipo-tag">${escapeHtml(item.tipo || '01')}</span>
+          </td>
+          <td>
+            <strong>${escapeHtml(item.serie)}</strong>
+          </td>
+          <td style="text-align: right; font-family: monospace; font-weight: 700; color: #b91c1c;">
+            ${escapeHtml(item.numero)}
+          </td>
+          <td style="text-align: center;">${escapeHtml(item.fecha_referencia || '-')}</td>
+          <td style="text-align: center;">
+            <span class="correl-badge-anulado">ANULADO</span>
+          </td>
+          <td style="text-align: right; font-family: monospace; color: var(--notion-text-subtle);">
+            S/ 0.00
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    // Actualizar estado del master check
+    const masterCheck = $('correlMasterCheck');
+    const visibleCheckboxes = document.querySelectorAll('#tbodyCorrelativos .correl-item-check');
+    if (masterCheck && visibleCheckboxes.length > 0) {
+      masterCheck.checked = Array.from(visibleCheckboxes).every((cb) => cb.checked);
+    }
+  }
+
+  async function completeCorrelAsAnulado() {
+    if (currentCorrelSelectedIndices.size === 0) {
+      notifyWarning('Sin Selección', 'Marque al menos un correlativo faltante para completar como ANULADO.');
+      return;
+    }
+
+    const count = currentCorrelSelectedIndices.size;
+    const confirmed = await notifyConfirm(
+      '¿Completar como ANULADO?',
+      `Se insertarán ${count} comprobante(s) en la propuesta de Ventas (RVIE) con estado ANULADO (importes en S/ 0.00, identidad 0 / 0001) para asegurar la correlatividad completa ante SUNAT.`,
+      'Sí, completar correlativos'
+    );
+    if (!confirmed) return;
+
+    // Obtener los ítems seleccionados
+    const itemsToInsert = [];
+    currentCorrelItems.forEach((it, idx) => {
+      if (currentCorrelSelectedIndices.has(idx)) {
+        itemsToInsert.push(it.item_propuesto);
+      }
+    });
+
+    if (!itemsToInsert.length) return;
+
+    // Agregar a la propuesta activa de Ventas
+    currentProposalItemsRvie = currentProposalItemsRvie.concat(itemsToInsert);
+
+    // Ordenar propuesta por TipoDoc, Serie y Número (numérico)
+    currentProposalItemsRvie.sort((a, b) => {
+      const tipoA = (a.tipo || '').trim();
+      const tipoB = (b.tipo || '').trim();
+      if (tipoA !== tipoB) return tipoA.localeCompare(tipoB);
+
+      const serieA = (a.serie || '').trim();
+      const serieB = (b.serie || '').trim();
+      if (serieA !== serieB) return serieA.localeCompare(serieB);
+
+      const numA = parseInt(a.numero || '0', 10) || 0;
+      const numB = parseInt(b.numero || '0', 10) || 0;
+      return numA - numB;
+    });
+
+    // Re-renderizar grilla principal
+    renderProposalTableGrid(false, currentProposalItemsRvie);
+
+    // Cerrar modal
+    $('modalValidarCorrelativos')?.close();
+
+    notifySuccess(
+      'Correlativos Completados',
+      `Se insertaron exitosamente ${count} comprobante(s) ANULADOS en la propuesta de Ventas (RVIE).`
+    );
+  }
+
+  function exportCorrelToExcel() {
+    if (!currentCorrelItems.length) {
+      notifyWarning('Sin Datos', 'No hay correlativos faltantes para exportar.');
+      return;
+    }
+
+    const headers = [
+      'N°',
+      'Tipo Doc.',
+      'Serie',
+      'Número Faltante',
+      'Fecha Referencial',
+      'Tipo Doc Identidad',
+      'Nro Doc Identidad',
+      'Razón Social Propuesta',
+      'Importe Total'
+    ];
+
+    const rows = currentCorrelItems.map((it, idx) => [
+      idx + 1,
+      `"${it.tipo || ''}"`,
+      `"${it.serie || ''}"`,
+      `"${it.numero || ''}"`,
+      it.fecha_referencia || '',
+      `"0"`,
+      `"0001"`,
+      `"ANULADO"`,
+      `0.00`
+    ]);
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+    a.download = `Correlativos_Faltantes_RVIE_${dateStr}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    notifySuccess('Reporte Descargado', 'Se descargó el reporte de correlativos faltantes en formato compatible con Excel.');
+  }
+
   // Monitoreo de actividad de la ventana (Heartbeat y Shutdown)
   function initWindowLifecycle() {
+
     setInterval(() => {
       fetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
     }, 3000);

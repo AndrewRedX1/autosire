@@ -17,12 +17,15 @@ import (
 	"appsire-go/internal/api"
 	"appsire-go/internal/auth"
 	"appsire-go/internal/company"
+	"appsire-go/internal/cpe"
 	"appsire-go/internal/engine"
 	"appsire-go/internal/excel"
+	"appsire-go/internal/exchangerate"
 	"appsire-go/internal/filemanager"
 	"appsire-go/internal/license"
 	"appsire-go/internal/secrets"
 	"appsire-go/internal/session"
+	"appsire-go/internal/ssco"
 	"appsire-go/internal/sunat"
 )
 
@@ -36,6 +39,7 @@ func main() {
 	downloadDir := flag.String("downloads", "./downloads", "Directorio base donde se guardarán los archivos descargados")
 	dataDir := flag.String("data", defaultDataDir(), "Directorio de datos locales de AutoSire")
 	noBrowser := flag.Bool("no-browser", false, "No abrir automáticamente el navegador")
+	noWatchdog := flag.Bool("no-watchdog", false, "Desactivar temporizador de inactividad automática (modo servicio/desarrollo)")
 	flag.Parse()
 
 	// Resolver ruta absoluta de downloads
@@ -85,6 +89,19 @@ func main() {
 		api.BuildInfo{Version: appVersion, BuiltAt: buildTime},
 	)
 
+	exchangeRateService, err := exchangerate.NewService(companyStore.DB())
+	if err != nil {
+		log.Printf("Advertencia inicializando servicio de tipo de cambio: %v", err)
+	} else {
+		server.SetExchangeRateService(exchangeRateService)
+	}
+
+	cpeClient := cpe.NewClient()
+	server.SetCPEClient(cpeClient)
+
+	sscoService := ssco.NewService(filepath.Join(*dataDir, "ssco"))
+	server.SetSSCOService(sscoService)
+
 	mux := http.NewServeMux()
 
 	// Rutas de Licencia AutoSire
@@ -106,6 +123,12 @@ func main() {
 	mux.HandleFunc("/api/excel/upload", server.RequireSession(server.HandleExcelUpload))
 	mux.HandleFunc("/api/excel/template", server.RequireSession(server.HandleDownloadTemplate))
 	mux.HandleFunc("/api/sire/proposal/download", server.RequireSession(server.HandleDownloadSireProposal))
+	mux.HandleFunc("/api/sire/validate-tc", server.RequireSession(server.HandleValidateTC))
+	mux.HandleFunc("/api/sire/validate-cpe", server.RequireSession(server.HandleValidateCPE))
+	mux.HandleFunc("/api/sire/validate-ssco", server.RequireSession(server.HandleValidateSSCO))
+	mux.HandleFunc("/api/sire/ssco/refresh", server.RequireSession(server.HandleRefreshSSCO))
+	mux.HandleFunc("/api/sire/cuadre/detect", server.RequireSession(server.HandleDetectCuadre))
+	mux.HandleFunc("/api/sire/correlativos/detect", server.RequireSession(server.HandleDetectCorrelativos))
 	mux.HandleFunc("/api/download/start", server.RequireSession(server.HandleStartDownload))
 	mux.HandleFunc("/api/download/item", server.RequireSession(server.HandleDownloadItem))
 	mux.HandleFunc("/api/download/status", server.RequireSession(server.HandleDownloadStatus))
@@ -126,6 +149,9 @@ func main() {
 	)
 
 	resetShutdownTimer := func(d time.Duration) {
+		if *noWatchdog {
+			return
+		}
 		shutdownMu.Lock()
 		defer shutdownMu.Unlock()
 		if shutdownTimer != nil {

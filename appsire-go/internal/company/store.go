@@ -102,6 +102,10 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+func (s *Store) DB() *sql.DB {
+	return s.db
+}
+
 func (s *Store) List(ctx context.Context) ([]Summary, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, ruc, business_name, sol_username, client_id, is_selected,
@@ -205,6 +209,74 @@ func (s *Store) Get(ctx context.Context, id int64) (Company, error) {
 	}
 	return c, nil
 }
+
+func (s *Store) GetSelected(ctx context.Context) (Company, error) {
+	var c Company
+	var encPass, encSec, encCpeSec []byte
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id, ruc, business_name, sol_username, sol_password,
+		       client_id, client_secret,
+		       COALESCE(cpe_client_id, ''), COALESCE(cpe_client_secret, X''),
+		       COALESCE(regimen, ''), COALESCE(whatsapp, ''), is_selected
+		FROM companies
+		WHERE is_selected = 1
+		LIMIT 1`).Scan(
+		&c.ID,
+		&c.RUC,
+		&c.BusinessName,
+		&c.SOLUsername,
+		&encPass,
+		&c.ClientID,
+		&encSec,
+		&c.CpeClientID,
+		&encCpeSec,
+		&c.Regimen,
+		&c.Whatsapp,
+		&c.Selected,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		// Si ninguna tiene is_selected = 1, intentar obtener la primera
+		err = s.db.QueryRowContext(ctx, `
+			SELECT id, ruc, business_name, sol_username, sol_password,
+			       client_id, client_secret,
+			       COALESCE(cpe_client_id, ''), COALESCE(cpe_client_secret, X''),
+			       COALESCE(regimen, ''), COALESCE(whatsapp, ''), is_selected
+			FROM companies
+			ORDER BY id ASC
+			LIMIT 1`).Scan(
+			&c.ID,
+			&c.RUC,
+			&c.BusinessName,
+			&c.SOLUsername,
+			&encPass,
+			&c.ClientID,
+			&encSec,
+			&c.CpeClientID,
+			&encCpeSec,
+			&c.Regimen,
+			&c.Whatsapp,
+			&c.Selected,
+		)
+		if errors.Is(err, sql.ErrNoRows) {
+			return Company{}, ErrNotFound
+		}
+	}
+	if err != nil {
+		return Company{}, fmt.Errorf("consultando empresa seleccionada: %w", err)
+	}
+
+	if len(encPass) > 0 {
+		c.SOLPassword, _ = s.protector.Decrypt(encPass)
+	}
+	if len(encSec) > 0 {
+		c.ClientSecret, _ = s.protector.Decrypt(encSec)
+	}
+	if len(encCpeSec) > 0 {
+		c.CpeClientSecret, _ = s.protector.Decrypt(encCpeSec)
+	}
+	return c, nil
+}
+
 
 func (s *Store) Save(ctx context.Context, company Company) (int64, error) {
 	if err := s.validateForSave(ctx, &company); err != nil {
@@ -439,7 +511,7 @@ func (s *Store) validateForSave(ctx context.Context, company *Company) error {
 		}
 	} else {
 		// Si se omite la clave o el secreto en edición, mantener los existentes
-		if strings.TrimSpace(company.SOLPassword) == "" || strings.TrimSpace(company.ClientSecret) == "" {
+		if strings.TrimSpace(company.SOLPassword) == "" || strings.TrimSpace(company.ClientSecret) == "" || strings.TrimSpace(company.CpeClientSecret) == "" {
 			existing, err := s.Get(ctx, company.ID)
 			if err == nil {
 				if strings.TrimSpace(company.SOLPassword) == "" {
@@ -447,6 +519,9 @@ func (s *Store) validateForSave(ctx context.Context, company *Company) error {
 				}
 				if strings.TrimSpace(company.ClientSecret) == "" {
 					company.ClientSecret = existing.ClientSecret
+				}
+				if strings.TrimSpace(company.CpeClientSecret) == "" {
+					company.CpeClientSecret = existing.CpeClientSecret
 				}
 			}
 		}
